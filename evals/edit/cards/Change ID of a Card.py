@@ -37,4 +37,4 @@ for model in Tortoise.apps.get("models", {}).values():
                 except:
                     pass
 await BallInstance.delete(ball)
-print(f"Successfully changed {old_id} into {new_id}!")
+print(f"Successfully changed {hex(old_id)} into {hex(new_id)}!")
