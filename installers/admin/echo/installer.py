@@ -1,4 +1,5 @@
-# IMPORTANT: Put your admin role id on line 29 and also attach the code txt file with this eval
+# IMPORTANT: Put your admin role id on line 30 and also attach the code txt file with this eval
+# About: This installer adds an admin exclusive command that allows admins to make the dex talk
 
 .eval
 content=(await message.attachments[0].read()).decode()
