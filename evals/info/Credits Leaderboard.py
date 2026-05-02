@@ -1,4 +1,4 @@
-# On line 4 you can put multiple specific credit names separated by a ,
+# On line 4 you can put multiple specific credit names separated by a , and also surrounded by " "
 
 .eval
 targets = {}
