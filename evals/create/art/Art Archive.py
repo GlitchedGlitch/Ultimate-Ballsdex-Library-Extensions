@@ -1,12 +1,16 @@
 
-# Note: On the up= line at the beginning you can put specific balls to update or create forums. There's also a new=True on the same line, False will update specific balls inputted or all the forums if left empty, True will only create missing forums useful for new balls updates
+# Note: On the up= line at the beginning you can put specific balls to update or create forums.
+# There's also a new=True on the same line,
+# False will update specific balls inputted or all the forums if left empty,
+# True will only create missing forums useful for new balls updates
+# Remember to put the Forum Channel ID on line 13
 
 .eval
 import asyncio,os
 from io import BytesIO
 from discord import File
 
-ch=await bot.fetch_channel(ChannelIDHere)
+ch=await bot.fetch_channel(ForumChannelIDHere)
 up={"Ball 1", "Ball 2"}; new=True; s=1.2; B="./admin_panel/media/"
 C={}; E={".png",".jpg",".jpeg",".gif",".webp"}
 
