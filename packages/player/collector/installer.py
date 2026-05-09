@@ -26,7 +26,6 @@ def download_files():
 
 
 def ensure_requirements_file():
-    """Create requirements.txt if it doesn't exist yet (preserves existing data)."""
     if not os.path.isfile(REQUIREMENTS_FILE):
         with open(REQUIREMENTS_FILE, "w") as f:
             f.write("{}")
@@ -80,7 +79,7 @@ def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
 
 def build_confirm_embed() -> discord.Embed:
     embed = discord.Embed(
-        title="🗑️ Delete Collector Package",
+        title="Delete Collector Package",
         description=(
             "⚠️ **Are you sure you want to delete the Collector package?**\n\n"
             "This will:\n"
@@ -123,10 +122,15 @@ class ConfirmDeleteView(View):
         self.parent = parent
 
     async def on_timeout(self):
-        for c in self.children:
-            c.disabled = True
-        color = discord.Color.gold() if self.parent.installed else discord.Color.greyple()
-        await self.parent.message.edit(embed=build_main_embed(self.parent.installed, color), view=self.parent)
+        # Only restore main view if we're not already in an error/done state
+        if not self.parent.done:
+            for c in self.children:
+                c.disabled = True
+            color = discord.Color.gold() if self.parent.installed else discord.Color.greyple()
+            await self.parent.message.edit(
+                embed=build_main_embed(self.parent.installed, color),
+                view=self.parent,
+            )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.parent.ctx.author.id:
@@ -149,7 +153,7 @@ class ConfirmDeleteView(View):
             if hasattr(self.parent.bot, "collector_claimed"):
                 del self.parent.bot.collector_claimed
             self.parent.installed = False
-            self.parent._update_buttons()
+            self.parent.done = True
             self.stop()
             await self.parent.message.edit(
                 embed=build_result_embed(
@@ -168,6 +172,8 @@ class ConfirmDeleteView(View):
             )
         except Exception:
             err = traceback.format_exc()
+            self.parent.done = True
+            self.stop()
             f = discord.File(io.BytesIO(err.encode()), filename="delete_error.txt")
             await self.parent.message.edit(embed=build_error_embed("deleting", err), view=None)
             await interaction.followup.send(file=f)
@@ -176,7 +182,10 @@ class ConfirmDeleteView(View):
     async def cancel_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
         color = discord.Color.gold() if self.parent.installed else discord.Color.greyple()
-        await self.parent.message.edit(embed=build_main_embed(self.parent.installed, color), view=self.parent)
+        await self.parent.message.edit(
+            embed=build_main_embed(self.parent.installed, color),
+            view=self.parent,
+        )
 
 
 class CollectorInstallerView(View):
@@ -185,6 +194,7 @@ class CollectorInstallerView(View):
         self.bot = bot
         self.ctx = ctx
         self.installed = installed
+        self.done = False  # True once install/update/delete completes or errors
         self.message = None
         self._update_buttons()
 
@@ -196,6 +206,9 @@ class CollectorInstallerView(View):
                 c.disabled = not self.installed
 
     async def on_timeout(self):
+        # Don't overwrite error or success embeds on timeout
+        if self.done:
+            return
         for c in self.children:
             c.disabled = True
         if self.message:
@@ -218,6 +231,7 @@ class CollectorInstallerView(View):
             ensure_requirements_file()
             add_to_config()
             await self.bot.load_extension("ballsdex.packages.collector")
+            self.done = True
             self.stop()
             await self.message.edit(
                 embed=build_result_embed(
@@ -234,6 +248,8 @@ class CollectorInstallerView(View):
             )
         except Exception:
             err = traceback.format_exc()
+            self.done = True
+            self.stop()
             f = discord.File(io.BytesIO(err.encode()), filename="install_error.txt")
             await self.message.edit(embed=build_error_embed("installing", err), view=None)
             await interaction.followup.send(file=f)
@@ -243,12 +259,12 @@ class CollectorInstallerView(View):
         await interaction.response.defer()
         try:
             download_files()
-            # reload if loaded, load if not
-            loaded = "ballsdex.packages.collector" in [e for e in self.bot.extensions]
+            loaded = "ballsdex.packages.collector" in self.bot.extensions
             if loaded:
                 await self.bot.reload_extension("ballsdex.packages.collector")
             else:
                 await self.bot.load_extension("ballsdex.packages.collector")
+            self.done = True
             self.stop()
             await self.message.edit(
                 embed=build_result_embed(
@@ -264,6 +280,8 @@ class CollectorInstallerView(View):
             )
         except Exception:
             err = traceback.format_exc()
+            self.done = True
+            self.stop()
             f = discord.File(io.BytesIO(err.encode()), filename="update_error.txt")
             await self.message.edit(embed=build_error_embed("updating", err), view=None)
             await interaction.followup.send(file=f)
