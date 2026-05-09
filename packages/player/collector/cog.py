@@ -3,21 +3,12 @@ Collector package for BallsDex.
 
 Adds two commands:
   /collector claim  — players claim a collector version of a ball if they meet requirements.
-  /admin collector  — bot admins manage collector requirements and rewards.
+  /collector list   — lists all active collector requirements.
+  /admin collector set    — bot admins set a collector requirement and reward.
+  /admin collector delete — bot admins delete a collector requirement.
+  /admin collector view   — bot admins inspect a specific requirement.
 
-Requirements are stored in-memory as a dict keyed by Ball.pk.
-Each entry looks like:
-    {
-        "ball_id":   int,
-        "ball_name": str,
-        "amount":    int,       # minimum duplicates required
-        "special_id": int,      # Special.pk to award
-        "special_name": str,
-    }
-
-Players who have already claimed are tracked in a set per requirement to prevent
-double-claiming within the same bot session. For persistent tracking across restarts
-you would add a Django model — see the BallsDex wiki for guidance.
+Requirements are stored on the bot object so they persist across cog reloads.
 """
 
 from __future__ import annotations
@@ -29,6 +20,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from ballsdex.core.models import BallInstance, Player, Special
 from ballsdex.core.utils.transformers import BallTransform, SpecialTransform
 from ballsdex.settings import settings
 
@@ -37,35 +29,17 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("ballsdex.packages.collector")
 
-# ──────────────────────────────────────────────────────────────────────────────
-# In-memory storage
-# ──────────────────────────────────────────────────────────────────────────────
-
-# collector_requirements: dict[ball_id -> requirement dict]
-collector_requirements: dict[int, dict] = {}
-
-# claimed_players: dict[ball_id -> set of discord user IDs that already claimed]
-claimed_players: dict[int, set[int]] = {}
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Helper
-# ──────────────────────────────────────────────────────────────────────────────
-
-def _collectible_name() -> str:
-    """Return the configured collectible name (cross-dex compatible)."""
-    return settings.collectible_name
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Cog
-# ──────────────────────────────────────────────────────────────────────────────
 
 class CollectorCog(commands.Cog):
     """Collector package — lets players claim special collector versions of balls."""
 
     def __init__(self, bot: "BallsDexBot"):
         self.bot = bot
+        # Store on the bot object so data survives cog reloads
+        if not hasattr(bot, "collector_requirements"):
+            bot.collector_requirements: dict[int, dict] = {}
+        if not hasattr(bot, "collector_claimed"):
+            bot.collector_claimed: dict[int, set[int]] = {}
 
     # ── /collector (group) ────────────────────────────────────────────────────
 
@@ -92,48 +66,35 @@ class CollectorCog(commands.Cog):
 
     @collector_group.command(name="claim", description="Claim your collector ball reward")
     @app_commands.describe(
-        countryball=f"The {_collectible_name()} you want to claim a collector version of",
+        countryball="The ball you want to claim a collector version of",
     )
     async def collector_claim(
         self,
         interaction: discord.Interaction["BallsDexBot"],
         countryball: BallTransform,
     ):
-        """
-        Claim a collector version of a ball if you meet the requirements.
-
-        You must own at least the configured minimum number of that ball,
-        and you can only claim once per ball.
-        """
         await interaction.response.defer(ephemeral=True)
 
         ball = countryball
         ball_id = ball.pk
+        requirements = self.bot.collector_requirements
+        claimed = self.bot.collector_claimed
 
         # Check requirement exists
-        if ball_id not in collector_requirements:
+        if ball_id not in requirements:
             await interaction.followup.send(
                 f"There is no collector requirement set for **{ball.country}**.",
                 ephemeral=True,
             )
             return
 
-        req = collector_requirements[ball_id]
+        req = requirements[ball_id]
 
-        # Check player exists in DB
-        from ballsdex.core.models import BallInstance, Player, Special
+        # Get or create player
+        player, _ = await Player.get_or_create(discord_id=interaction.user.id)
 
-        try:
-            player = await Player.objects.aget(discord_id=interaction.user.id)
-        except Player.DoesNotExist:
-            await interaction.followup.send(
-                "You don't have a player profile yet. Catch some balls first!",
-                ephemeral=True,
-            )
-            return
-
-        # Check if already claimed this session
-        already_claimed = claimed_players.get(ball_id, set())
+        # Check if already claimed
+        already_claimed = claimed.get(ball_id, set())
         if interaction.user.id in already_claimed:
             await interaction.followup.send(
                 f"You have already claimed your collector **{ball.country}**!",
@@ -142,11 +103,11 @@ class CollectorCog(commands.Cog):
             return
 
         # Count how many of this ball the player owns
-        count = await BallInstance.objects.filter(
+        count = await BallInstance.filter(
             player=player,
             ball=ball,
             deleted=False,
-        ).acount()
+        ).count()
 
         required_amount = req["amount"]
         if count < required_amount:
@@ -158,9 +119,8 @@ class CollectorCog(commands.Cog):
             return
 
         # Fetch the reward Special
-        try:
-            special = await Special.objects.aget(pk=req["special_id"])
-        except Special.DoesNotExist:
+        special = await Special.get_or_none(pk=req["special_id"])
+        if special is None:
             await interaction.followup.send(
                 "The collector reward special no longer exists. Please contact an admin.",
                 ephemeral=True,
@@ -173,7 +133,7 @@ class CollectorCog(commands.Cog):
             return
 
         # Award — create a new BallInstance with the special
-        new_instance = await BallInstance.objects.acreate(
+        new_instance = await BallInstance.create(
             player=player,
             ball=ball,
             special=special,
@@ -183,7 +143,7 @@ class CollectorCog(commands.Cog):
         )
 
         # Mark as claimed
-        claimed_players.setdefault(ball_id, set()).add(interaction.user.id)
+        claimed.setdefault(ball_id, set()).add(interaction.user.id)
 
         log.info(
             "User %s (%d) claimed collector %s with special %s (instance #%X).",
@@ -194,10 +154,11 @@ class CollectorCog(commands.Cog):
             new_instance.pk,
         )
 
-        collectible = _collectible_name()
+        collectible = settings.collectible_name
         emoji_str = special.emoji or ""
         await interaction.followup.send(
-            f"🎉 Congratulations! You have claimed your **{emoji_str} {special.name} {ball.country}** "
+            f"Congratulations! You have claimed your "
+            f"**{emoji_str} {special.name} {ball.country}** "
             f"collector {collectible}!\n"
             f"It has been added to your collection as `#{new_instance.pk:0X}`.",
             ephemeral=True,
@@ -210,22 +171,23 @@ class CollectorCog(commands.Cog):
         description="List all active collector requirements",
     )
     async def collector_list(self, interaction: discord.Interaction["BallsDexBot"]):
-        """Show all active collector requirements."""
         await interaction.response.defer(ephemeral=True)
 
-        if not collector_requirements:
+        requirements = self.bot.collector_requirements
+
+        if not requirements:
             await interaction.followup.send(
                 "There are no collector requirements set up yet.",
                 ephemeral=True,
             )
             return
 
-        collectible = _collectible_name()
-        lines = [f"**Active Collector Requirements** ({len(collector_requirements)} total)\n"]
-        for req in collector_requirements.values():
+        collectible = settings.collectible_name
+        lines = [f"**Active Collector Requirements** ({len(requirements)} total)\n"]
+        for req in requirements.values():
             lines.append(
-                f"• **{req['ball_name']}** — own ≥ {req['amount']} → "
-                f"reward: {req['special_name']} special"
+                f"• **{req['ball_name']}** — own ≥ {req['amount']} {collectible}(s) → "
+                f"reward: **{req['special_name']}** special"
             )
 
         await interaction.followup.send("\n".join(lines), ephemeral=True)
@@ -237,7 +199,7 @@ class CollectorCog(commands.Cog):
         description="Set or update a collector requirement for a ball",
     )
     @app_commands.describe(
-        countryball=f"The {settings.collectible_name} to set a collector requirement for",
+        countryball="The ball to set a collector requirement for",
         amount="Minimum number of this ball the player must own to claim",
         special="The special event reward the player receives upon claiming",
     )
@@ -248,11 +210,6 @@ class CollectorCog(commands.Cog):
         amount: app_commands.Range[int, 1, 9999],
         special: SpecialTransform,
     ):
-        """
-        Set or update a collector requirement.
-
-        Only bot admins (users listed in settings.discord_owners_ids) can use this.
-        """
         if interaction.user.id not in self.bot.owner_ids:
             await interaction.response.send_message(
                 "Only bot admins can manage collector requirements.",
@@ -263,7 +220,7 @@ class CollectorCog(commands.Cog):
         ball = countryball
         ball_id = ball.pk
 
-        collector_requirements[ball_id] = {
+        self.bot.collector_requirements[ball_id] = {
             "ball_id": ball_id,
             "ball_name": ball.country,
             "amount": amount,
@@ -271,11 +228,11 @@ class CollectorCog(commands.Cog):
             "special_name": special.name,
         }
         # Reset claimed set when requirement changes
-        claimed_players.pop(ball_id, None)
+        self.bot.collector_claimed.pop(ball_id, None)
 
-        collectible = _collectible_name()
+        collectible = settings.collectible_name
         await interaction.response.send_message(
-            f"✅ Collector requirement set:\n"
+            f"Collector requirement set:\n"
             f"**{ball.country}** — own ≥ **{amount}** {collectible}(s) "
             f"→ reward **{special.name}** special.\n"
             f"Previous claims for this ball have been reset.",
@@ -296,18 +253,13 @@ class CollectorCog(commands.Cog):
         description="Delete a collector requirement for a ball",
     )
     @app_commands.describe(
-        countryball=f"The {settings.collectible_name} whose collector requirement you want to remove",
+        countryball="The ball whose collector requirement you want to remove",
     )
     async def admin_collector_delete(
         self,
         interaction: discord.Interaction["BallsDexBot"],
         countryball: BallTransform,
     ):
-        """
-        Delete an existing collector requirement.
-
-        Only bot admins can use this.
-        """
         if interaction.user.id not in self.bot.owner_ids:
             await interaction.response.send_message(
                 "Only bot admins can manage collector requirements.",
@@ -318,15 +270,15 @@ class CollectorCog(commands.Cog):
         ball = countryball
         ball_id = ball.pk
 
-        if ball_id not in collector_requirements:
+        if ball_id not in self.bot.collector_requirements:
             await interaction.response.send_message(
                 f"No collector requirement exists for **{ball.country}**.",
                 ephemeral=True,
             )
             return
 
-        del collector_requirements[ball_id]
-        claimed_players.pop(ball_id, None)
+        del self.bot.collector_requirements[ball_id]
+        self.bot.collector_claimed.pop(ball_id, None)
 
         await interaction.response.send_message(
             f"🗑️ Collector requirement for **{ball.country}** has been deleted.",
@@ -345,14 +297,13 @@ class CollectorCog(commands.Cog):
         description="View the collector requirement for a specific ball",
     )
     @app_commands.describe(
-        countryball=f"The {settings.collectible_name} to inspect",
+        countryball="The ball to inspect",
     )
     async def admin_collector_view(
         self,
         interaction: discord.Interaction["BallsDexBot"],
         countryball: BallTransform,
     ):
-        """View details of a specific collector requirement."""
         if interaction.user.id not in self.bot.owner_ids:
             await interaction.response.send_message(
                 "Only bot admins can view collector requirements.",
@@ -363,15 +314,15 @@ class CollectorCog(commands.Cog):
         ball = countryball
         ball_id = ball.pk
 
-        if ball_id not in collector_requirements:
+        if ball_id not in self.bot.collector_requirements:
             await interaction.response.send_message(
                 f"No collector requirement exists for **{ball.country}**.",
                 ephemeral=True,
             )
             return
 
-        req = collector_requirements[ball_id]
-        claimed_count = len(claimed_players.get(ball_id, set()))
+        req = self.bot.collector_requirements[ball_id]
+        claimed_count = len(self.bot.collector_claimed.get(ball_id, set()))
 
         await interaction.response.send_message(
             f"**Collector Requirement — {ball.country}**\n"
