@@ -44,8 +44,8 @@ def delete_files():
         shutil.rmtree(PKG)
 
 
-FOOTER = "Ultimate BallsDex Library Extensions • by GlitchedGlitch"
-FOOTER_TIMEOUT = "Ultimate BallsDex Library Extensions • by GlitchedGlitch • Timed out"
+FOOTER = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
+FOOTER_TIMEOUT = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch) • Timed out"
 
 
 def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
