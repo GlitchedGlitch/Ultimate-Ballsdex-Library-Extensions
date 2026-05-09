@@ -4,16 +4,15 @@ Collector package for BallsDex (v2.30 compatible).
 Commands:
   /collector claim  — claim a collector ball if requirements are met
   /collector list   — paginated list of active requirements
-  /admin collector set    — set a requirement (bot admins only, hidden)
-  /admin collector delete — delete a requirement (bot admins only, hidden)
-  /admin collector view   — inspect a requirement (bot admins only, hidden)
+  /admin collector set    — set a requirement (admin only)
+  /admin collector delete — delete a requirement (admin only)
+  /admin collector view   — inspect a requirement (admin only)
 
 Requirements persist on the bot object across cog reloads and are saved to
 /code/ballsdex/packages/collector/requirements.txt so they survive updates.
 
-Admin actions are logged to the channel set under "log-channel" in config.yml.
-Admin commands are hidden from users who don't have root or admin roles defined
-in config.yml under admin-command.root-role-ids / admin-role-ids.
+Admin actions are logged via ballsdex.core.utils.logging.log_action,
+which uses the log-channel set in config.yml automatically.
 """
 
 from __future__ import annotations
@@ -28,6 +27,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from ballsdex.core.models import BallInstance, Player, Special
+from ballsdex.core.utils.logging import log_action
 from ballsdex.core.utils.paginator import FieldPageSource, Pages
 from ballsdex.core.utils.transformers import BallTransform, SpecialTransform
 from ballsdex.settings import settings
@@ -75,37 +75,116 @@ def _ball_emoji(bot: "BallsDexBot", ball_id: int) -> str:
     return "•"
 
 
-async def _send_admin_log(bot: "BallsDexBot", message: str) -> None:
-    """Send a plain-text message to the log channel defined in config.yml."""
-    if not settings.log_channel:
-        return
-    channel = bot.get_channel(settings.log_channel)
-    if isinstance(channel, discord.TextChannel):
-        try:
-            await channel.send(message)
-        except Exception:
-            log.warning("Could not send to log channel", exc_info=True)
+# ── /admin collector — standalone Group (NOT inside CollectorCog) ─────────────
+# Defined as a plain app_commands.Group so __init__.py can attach it directly
+# to the existing /admin group without triggering CommandAlreadyRegistered.
+
+class CollectorAdminGroup(app_commands.Group):
+    """Manage collector requirements"""
+
+    def __init__(self, bot: "BallsDexBot"):
+        super().__init__(name="collector", description="Manage collector requirements")
+        self.bot = bot
+
+    @app_commands.command(name="set", description="Set or update a collector requirement")
+    @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
+    @app_commands.describe(
+        countryball="The ball to set a requirement for",
+        amount="Minimum number the player must own",
+        special="The special reward the player receives",
+    )
+    async def collector_set(
+        self,
+        interaction: discord.Interaction["BallsDexBot"],
+        countryball: BallTransform,
+        amount: app_commands.Range[int, 1, 9999],
+        special: SpecialTransform,
+    ):
+        ball = countryball
+        self.bot.collector_requirements[ball.pk] = {
+            "ball_id": ball.pk,
+            "ball_name": ball.country,
+            "amount": amount,
+            "special_id": special.pk,
+            "special_name": special.name,
+        }
+        self.bot.collector_claimed.pop(ball.pk, None)
+        _save_requirements(self.bot.collector_requirements)
+
+        await interaction.response.send_message(
+            f"Collector requirement set: **{ball.country}** — "
+            f"own ≥ **{amount}** → reward **{special.name}**.\n"
+            f"Previous claims for this ball have been reset.",
+            ephemeral=True,
+        )
+        await log_action(
+            f"{interaction.user.name} set collector requirement for "
+            f"{ball.country}. "
+            f"(Minimum={amount} Special={special.name})",
+            interaction.client,
+        )
+
+    @app_commands.command(name="delete", description="Delete a collector requirement")
+    @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
+    @app_commands.describe(countryball="The ball whose requirement you want to remove")
+    async def collector_delete(
+        self,
+        interaction: discord.Interaction["BallsDexBot"],
+        countryball: BallTransform,
+    ):
+        ball = countryball
+        if ball.pk not in self.bot.collector_requirements:
+            await interaction.response.send_message(
+                f"No collector requirement exists for **{ball.country}**.", ephemeral=True
+            )
+            return
+
+        del self.bot.collector_requirements[ball.pk]
+        self.bot.collector_claimed.pop(ball.pk, None)
+        _save_requirements(self.bot.collector_requirements)
+
+        await interaction.response.send_message(
+            f"Collector requirement for **{ball.country}** has been deleted.",
+            ephemeral=True,
+        )
+        await log_action(
+            f"{interaction.user.name} deleted collector requirement for "
+            f"{ball.country}.",
+            interaction.client,
+        )
+
+    @app_commands.command(name="view", description="View a specific collector requirement")
+    @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
+    @app_commands.describe(countryball="The ball to inspect")
+    async def collector_view(
+        self,
+        interaction: discord.Interaction["BallsDexBot"],
+        countryball: BallTransform,
+    ):
+        ball = countryball
+        if ball.pk not in self.bot.collector_requirements:
+            await interaction.response.send_message(
+                f"No collector requirement exists for **{ball.country}**.", ephemeral=True
+            )
+            return
+
+        req = self.bot.collector_requirements[ball.pk]
+        claimed_count = len(self.bot.collector_claimed.get(ball.pk, set()))
+        await interaction.response.send_message(
+            f"**Collector Requirement — {ball.country}**\n"
+            f"• Minimum: **{req['amount']}**\n"
+            f"• Reward: **{req['special_name']}** (ID `{req['special_id']}`)\n"
+            f"• Claims this session: **{claimed_count}**",
+            ephemeral=True,
+        )
 
 
-def _is_admin(interaction: discord.Interaction) -> bool:
-    """
-    Returns True if the user has any of the root or admin roles
-    defined in settings (admin-command.root-role-ids / admin-role-ids).
-    Also returns True if the user is a bot owner.
-    """
-    if interaction.user.id in interaction.client.owner_ids:
-        return True
-    if not isinstance(interaction.user, discord.Member):
-        return False
-    user_role_ids = {r.id for r in interaction.user.roles}
-    allowed = set(settings.root_role_ids) | set(settings.admin_role_ids)
-    return bool(user_role_ids & allowed)
-
-
-# ── Cog ───────────────────────────────────────────────────────────────────────
+# ── Player-facing cog ─────────────────────────────────────────────────────────
+# NOTE: no admin_group or admin_collector_group defined here.
+# Those are handled by CollectorAdminGroup above, attached in __init__.py.
 
 class CollectorCog(commands.Cog):
-    """Collector package."""
+    """Collector package — player commands."""
 
     def __init__(self, bot: "BallsDexBot"):
         self.bot = bot
@@ -114,25 +193,9 @@ class CollectorCog(commands.Cog):
         if not hasattr(bot, "collector_claimed"):
             bot.collector_claimed: dict[int, set[int]] = {}
 
-    # ── Groups ────────────────────────────────────────────────────────────────
-
     collector_group = app_commands.Group(
         name="collector",
         description="Collector commands",
-    )
-
-    # Hidden from non-admins via guild_ids restriction (registered only in
-    # admin guilds) + interaction check, matching how BallsDex itself does it.
-    admin_group = app_commands.Group(
-        name="admin",
-        description="Admin commands",
-        guild_ids=settings.admin_guild_ids or None,
-        default_permissions=discord.Permissions(administrator=True),
-    )
-    admin_collector_group = app_commands.Group(
-        name="collector",
-        description="Manage collector requirements",
-        parent=admin_group,
     )
 
     # ── /collector claim ──────────────────────────────────────────────────────
@@ -201,6 +264,14 @@ class CollectorCog(commands.Cog):
             "User %s (%d) claimed collector %s / special %s (#%X)",
             interaction.user, interaction.user.id, ball.country, special.name, new_instance.pk,
         )
+        await log_action(
+            f"{interaction.user.name} claimed {ball.country} "
+            f"`(#{new_instance.pk:0X})`. "
+            f"(Special={special.name} "
+            f"ATK={new_instance.attack_bonus:+d} "
+            f"HP={new_instance.health_bonus:+d})",
+            interaction.client,
+        )
 
         emoji_str = special.emoji or ""
         await interaction.followup.send(
@@ -213,7 +284,7 @@ class CollectorCog(commands.Cog):
     # ── /collector list ───────────────────────────────────────────────────────
 
     @collector_group.command(name="list", description="List all active collector requirements")
-    @app_commands.describe(reverse="Reverse the output of the list")
+    @app_commands.describe(reverse="Sort from highest to lowest amount (default: lowest first)")
     async def collector_list(
         self,
         interaction: discord.Interaction["BallsDexBot"],
@@ -243,136 +314,11 @@ class CollectorCog(commands.Cog):
             ]
             entries.append((f"Minimum: {amount}", "\n".join(lines)))
 
-        total_pages = -(-len(entries) // GROUPS_PER_PAGE)  # ceiling division
+        total_pages = -(-len(entries) // GROUPS_PER_PAGE)
         
         source = FieldPageSource(entries, per_page=GROUPS_PER_PAGE, inline=False)
         source.embed.title = "Collector List"
         source.embed.color = discord.Color.gold()
 
-        if total_pages > 1:
-            source.embed.set_footer(
-                text=f"{len(requirements)} requirement(s)"
-            )
-        else:
-            source.embed.set_footer(text=f"{len(requirements)} requirement(s)")
-
         pages = Pages(source, interaction=interaction)
         await pages.start(ephemeral=True)
-
-    # ── /admin collector set ──────────────────────────────────────────────────
-
-    @admin_collector_group.command(name="set", description="Set or update a collector requirement")
-    @app_commands.describe(
-        countryball="The ball to set a requirement for",
-        amount="Minimum number the player must own",
-        special="The special reward the player receives",
-    )
-    async def admin_collector_set(
-        self,
-        interaction: discord.Interaction["BallsDexBot"],
-        countryball: BallTransform,
-        amount: app_commands.Range[int, 1, 9999],
-        special: SpecialTransform,
-    ):
-        if not _is_admin(interaction):
-            await interaction.response.send_message(
-                "You don't have permission to use this command.", ephemeral=True
-            )
-            return
-
-        ball = countryball
-        self.bot.collector_requirements[ball.pk] = {
-            "ball_id": ball.pk,
-            "ball_name": ball.country,
-            "amount": amount,
-            "special_id": special.pk,
-            "special_name": special.name,
-        }
-        self.bot.collector_claimed.pop(ball.pk, None)
-        _save_requirements(self.bot.collector_requirements)
-
-        await interaction.response.send_message(
-            f"✅ Collector requirement set: **{ball.country}** — "
-            f"own ≥ **{amount}** → reward **{special.name}**.\n"
-            f"Previous claims for this ball have been reset.",
-            ephemeral=True,
-        )
-        await _send_admin_log(
-            self.bot,
-            f"{interaction.user.name} set collector requirement for "
-            f"{ball.country}. "
-            f"(Minimum={amount} Special={special.name})",
-        )
-        log.info(
-            "Admin %s set collector: ball=%s amount=%d special=%s",
-            interaction.user, ball.country, amount, special.name,
-        )
-
-    # ── /admin collector delete ───────────────────────────────────────────────
-
-    @admin_collector_group.command(name="delete", description="Delete a collector requirement")
-    @app_commands.describe(countryball="The ball whose requirement you want to remove")
-    async def admin_collector_delete(
-        self,
-        interaction: discord.Interaction["BallsDexBot"],
-        countryball: BallTransform,
-    ):
-        if not _is_admin(interaction):
-            await interaction.response.send_message(
-                "You don't have permission to use this command.", ephemeral=True
-            )
-            return
-
-        ball = countryball
-        if ball.pk not in self.bot.collector_requirements:
-            await interaction.response.send_message(
-                f"No collector requirement exists for **{ball.country}**.", ephemeral=True
-            )
-            return
-
-        del self.bot.collector_requirements[ball.pk]
-        self.bot.collector_claimed.pop(ball.pk, None)
-        _save_requirements(self.bot.collector_requirements)
-
-        await interaction.response.send_message(
-            f"🗑️ Collector requirement for **{ball.country}** has been deleted.",
-            ephemeral=True,
-        )
-        await _send_admin_log(
-            self.bot,
-            f"{interaction.user.name} deleted collector requirement for "
-            f"{ball.country}.",
-        )
-        log.info("Admin %s deleted collector: ball=%s", interaction.user, ball.country)
-
-    # ── /admin collector view ─────────────────────────────────────────────────
-
-    @admin_collector_group.command(name="view", description="View a specific collector requirement")
-    @app_commands.describe(countryball="The ball to inspect")
-    async def admin_collector_view(
-        self,
-        interaction: discord.Interaction["BallsDexBot"],
-        countryball: BallTransform,
-    ):
-        if not _is_admin(interaction):
-            await interaction.response.send_message(
-                "You don't have permission to use this command.", ephemeral=True
-            )
-            return
-
-        ball = countryball
-        if ball.pk not in self.bot.collector_requirements:
-            await interaction.response.send_message(
-                f"No collector requirement exists for **{ball.country}**.", ephemeral=True
-            )
-            return
-
-        req = self.bot.collector_requirements[ball.pk]
-        claimed_count = len(self.bot.collector_claimed.get(ball.pk, set()))
-        await interaction.response.send_message(
-            f"**Collector Requirement — {ball.country}**\n"
-            f"• Minimum: **{req['amount']}**\n"
-            f"• Reward: **{req['special_name']}** (ID `{req['special_id']}`)\n"
-            f"• Claims this session: **{claimed_count}**",
-            ephemeral=True,
-        )
