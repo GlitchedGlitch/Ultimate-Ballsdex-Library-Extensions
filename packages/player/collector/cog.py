@@ -284,7 +284,7 @@ class CollectorCog(commands.Cog):
     # ── /collector list ───────────────────────────────────────────────────────
 
     @collector_group.command(name="list", description="List all active collector requirements")
-    @app_commands.describe(reverse="Sort from highest to lowest amount (default: lowest first)")
+    @app_commands.describe(reverse="Reverse the output of the list")
     async def collector_list(
         self,
         interaction: discord.Interaction["BallsDexBot"],
