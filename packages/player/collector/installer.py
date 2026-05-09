@@ -8,7 +8,7 @@ CONFIG = "/code/config.yml"
 REQUIREMENTS_FILE = os.path.join(PKG, "requirements.txt")
 PACKAGE_ENTRY = "  - ballsdex.packages.collector"
 FILES = ("__init__.py", "cog.py")
-FOOTER = "Ultimate BallsDex Library Extensions • by GlitchedGlitch"
+FOOTER = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
 FOOTER_TIMEOUT = FOOTER + " • Timed out"
 
 
