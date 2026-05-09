@@ -1,5 +1,5 @@
 """
-Collector package for BallsDex (v2.30 compatible).
+Collector package for BallsDex.
 
 Commands:
   /collector claim  — claim a collector ball if requirements are met
@@ -8,9 +8,10 @@ Commands:
   /admin collector delete — delete a requirement (bot admins only, hidden)
   /admin collector view   — inspect a requirement (bot admins only, hidden)
 
-Requirements persist on the bot object across cog reloads.
-They are also saved to /code/ballsdex/packages/collector/requirements.txt
-so they survive package updates.
+Requirements persist on the bot object across cog reloads and are saved to
+/code/ballsdex/packages/collector/requirements.txt so they survive updates.
+
+Admin actions are logged to the channel set under "log-channel" in config.yml.
 """
 
 from __future__ import annotations
@@ -18,15 +19,13 @@ from __future__ import annotations
 import json
 import logging
 import os
-import traceback
 from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from ballsdex.core.bot import owner_check
-from ballsdex.core.models import BallInstance, GuildConfig, Player, Special
+from ballsdex.core.models import BallInstance, Player, Special
 from ballsdex.core.utils.paginator import FieldPageSource, Pages
 from ballsdex.core.utils.transformers import BallTransform, SpecialTransform
 from ballsdex.settings import settings
@@ -38,6 +37,17 @@ log = logging.getLogger("ballsdex.packages.collector")
 
 GROUPS_PER_PAGE = 7
 REQUIREMENTS_FILE = "/code/ballsdex/packages/collector/requirements.txt"
+
+# ── Log channel — read once from config.yml at import time ───────────────────
+
+_LOG_CHANNEL_ID: int | None = None
+try:
+    import yaml
+    with open("/code/config.yml", "r") as _f:
+        _cfg = yaml.safe_load(_f)
+    _LOG_CHANNEL_ID = int(_cfg["log-channel"]) if _cfg.get("log-channel") else None
+except Exception:
+    pass  # log channel simply won't be used if config is unreadable
 
 
 # ── Persistence helpers ───────────────────────────────────────────────────────
@@ -63,7 +73,7 @@ def _load_requirements() -> dict[int, dict]:
         return {}
 
 
-# ── Emoji helper ─────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _ball_emoji(bot: "BallsDexBot", ball_id: int) -> str:
     from ballsdex.core.models import balls as balls_cache
@@ -75,25 +85,16 @@ def _ball_emoji(bot: "BallsDexBot", ball_id: int) -> str:
     return "•"
 
 
-# ── Log channel helper ────────────────────────────────────────────────────────
-
-async def _send_admin_log(
-    bot: "BallsDexBot",
-    interaction: discord.Interaction,
-    message: str,
-) -> None:
-    """Send a message to the guild's configured log channel, if any."""
-    if not interaction.guild_id:
+async def _send_admin_log(bot: "BallsDexBot", message: str) -> None:
+    """Send a plain-text message to the configured collector log channel."""
+    if not _LOG_CHANNEL_ID:
         return
-    try:
-        config = await GuildConfig.get_or_none(guild_id=interaction.guild_id)
-        if config and config.spawn_channel:
-            # BallsDex stores the log/spawn channel id on GuildConfig
-            channel = bot.get_channel(config.spawn_channel)
-            if isinstance(channel, discord.TextChannel):
-                await channel.send(message)
-    except Exception:
-        log.warning("Could not send admin log to channel", exc_info=True)
+    channel = bot.get_channel(_LOG_CHANNEL_ID)
+    if isinstance(channel, discord.TextChannel):
+        try:
+            await channel.send(message)
+        except Exception:
+            log.warning("Could not send to collector log channel", exc_info=True)
 
 
 # ── Cog ───────────────────────────────────────────────────────────────────────
@@ -103,7 +104,6 @@ class CollectorCog(commands.Cog):
 
     def __init__(self, bot: "BallsDexBot"):
         self.bot = bot
-        # Persist requirements on bot object so reloads don't wipe them
         if not hasattr(bot, "collector_requirements"):
             bot.collector_requirements: dict[int, dict] = _load_requirements()
         if not hasattr(bot, "collector_claimed"):
@@ -116,7 +116,6 @@ class CollectorCog(commands.Cog):
         description="Collector commands",
     )
 
-    # /admin group: guild-level administrator permission hides it from non-admins
     admin_group = app_commands.Group(
         name="admin",
         description="Admin commands",
@@ -195,6 +194,17 @@ class CollectorCog(commands.Cog):
             "User %s (%d) claimed collector %s / special %s (#%X)",
             interaction.user, interaction.user.id, ball.country, special.name, new_instance.pk,
         )
+
+        # Log to admin channel
+        await _send_admin_log(
+            self.bot,
+            f"{interaction.user.name} claimed {ball.country} "
+            f"`(#{new_instance.pk:0X})`. "
+            f"(Special={special.name} "
+            f"ATK={new_instance.attack_bonus:+d} "
+            f"HP={new_instance.health_bonus:+d})",
+        )
+
         emoji_str = special.emoji or ""
         await interaction.followup.send(
             f"🎉 Congratulations! You claimed your **{emoji_str} {special.name} {ball.country}** "
@@ -221,14 +231,12 @@ class CollectorCog(commands.Cog):
             )
             return
 
-        # Sort and group by amount
         sorted_reqs = sorted(requirements.values(), key=lambda r: r["amount"], reverse=reverse)
         grouped: dict[int, list[dict]] = {}
         for req in sorted_reqs:
             grouped.setdefault(req["amount"], []).append(req)
         sorted_amounts = list(grouped.keys())
 
-        # Build (field_name, field_value) tuples for FieldPageSource
         entries: list[tuple[str, str]] = []
         for amount in sorted_amounts:
             reqs = grouped[amount]
@@ -281,14 +289,23 @@ class CollectorCog(commands.Cog):
         self.bot.collector_claimed.pop(ball.pk, None)
         _save_requirements(self.bot.collector_requirements)
 
-        msg = (
-            f"✅ **Collector requirement set** by {interaction.user.mention}\n"
-            f"• Ball: **{ball.country}** | Minimum: **{amount}** | Reward: **{special.name}**"
+        await interaction.response.send_message(
+            f"✅ Collector requirement set: **{ball.country}** — "
+            f"own ≥ **{amount}** → reward **{special.name}**.\n"
+            f"Previous claims for this ball have been reset.",
+            ephemeral=True,
         )
-        await interaction.response.send_message(msg, ephemeral=True)
-        await _send_admin_log(self.bot, interaction, msg)
-        log.info("Admin %s set collector: ball=%s amount=%d special=%s",
-                 interaction.user, ball.country, amount, special.name)
+
+        await _send_admin_log(
+            self.bot,
+            f"{interaction.user.name} set collector requirement for "
+            f"{ball.country} `({ball.pk:0X})`. "
+            f"(Minimum={amount} Special={special.name})",
+        )
+        log.info(
+            "Admin %s set collector: ball=%s amount=%d special=%s",
+            interaction.user, ball.country, amount, special.name,
+        )
 
     # ── /admin collector delete ───────────────────────────────────────────────
 
@@ -316,13 +333,19 @@ class CollectorCog(commands.Cog):
         self.bot.collector_claimed.pop(ball.pk, None)
         _save_requirements(self.bot.collector_requirements)
 
-        msg = (
-            f"🗑️ **Collector requirement deleted** by {interaction.user.mention}\n"
-            f"• Ball: **{ball.country}**"
+        await interaction.response.send_message(
+            f"🗑️ Collector requirement for **{ball.country}** has been deleted.",
+            ephemeral=True,
         )
-        await interaction.response.send_message(msg, ephemeral=True)
-        await _send_admin_log(self.bot, interaction, msg)
-        log.info("Admin %s deleted collector: ball=%s", interaction.user, ball.country)
+
+        await _send_admin_log(
+            self.bot,
+            f"{interaction.user.name} deleted collector requirement for "
+            f"{ball.country} `({ball.pk:0X})`.",
+        )
+        log.info(
+            "Admin %s deleted collector: ball=%s", interaction.user, ball.country
+        )
 
     # ── /admin collector view ─────────────────────────────────────────────────
 
