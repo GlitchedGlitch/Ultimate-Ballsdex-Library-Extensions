@@ -2,7 +2,7 @@ import base64, os, requests
 
 REPO = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
 BASE = "https://api.github.com/repos/{}/contents/packages/player/collector/{}".format(REPO, "{}")
-PKG = os.path.join(os.path.dirname(__file__), "ballsdex", "packages", "collector")
+PKG = "/code/ballsdex/packages/collector"
 
 os.makedirs(PKG, exist_ok=True)
 
