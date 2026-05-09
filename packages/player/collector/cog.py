@@ -1,5 +1,5 @@
 """
-Collector package for BallsDex.
+Collector package for BallsDex (v2.30 compatible).
 
 Commands:
   /collector claim  — claim a collector ball if requirements are met
@@ -12,6 +12,8 @@ Requirements persist on the bot object across cog reloads and are saved to
 /code/ballsdex/packages/collector/requirements.txt so they survive updates.
 
 Admin actions are logged to the channel set under "log-channel" in config.yml.
+Admin commands are hidden from users who don't have root or admin roles defined
+in config.yml under admin-command.root-role-ids / admin-role-ids.
 """
 
 from __future__ import annotations
@@ -38,19 +40,8 @@ log = logging.getLogger("ballsdex.packages.collector")
 GROUPS_PER_PAGE = 7
 REQUIREMENTS_FILE = "/code/ballsdex/packages/collector/requirements.txt"
 
-# ── Log channel — read once from config.yml at import time ───────────────────
 
-_LOG_CHANNEL_ID: int | None = None
-try:
-    import yaml
-    with open("/code/config.yml", "r") as _f:
-        _cfg = yaml.safe_load(_f)
-    _LOG_CHANNEL_ID = int(_cfg["log-channel"]) if _cfg.get("log-channel") else None
-except Exception:
-    pass  # log channel simply won't be used if config is unreadable
-
-
-# ── Persistence helpers ───────────────────────────────────────────────────────
+# ── Persistence ───────────────────────────────────────────────────────────────
 
 def _save_requirements(requirements: dict[int, dict]) -> None:
     try:
@@ -66,7 +57,6 @@ def _load_requirements() -> dict[int, dict]:
     try:
         with open(REQUIREMENTS_FILE, "r") as f:
             raw = json.load(f)
-        # JSON keys are always strings; convert back to int
         return {int(k): v for k, v in raw.items()}
     except Exception:
         log.warning("Could not load requirements.txt", exc_info=True)
@@ -86,15 +76,30 @@ def _ball_emoji(bot: "BallsDexBot", ball_id: int) -> str:
 
 
 async def _send_admin_log(bot: "BallsDexBot", message: str) -> None:
-    """Send a plain-text message to the configured collector log channel."""
-    if not _LOG_CHANNEL_ID:
+    """Send a plain-text message to the log channel defined in config.yml."""
+    if not settings.log_channel:
         return
-    channel = bot.get_channel(_LOG_CHANNEL_ID)
+    channel = bot.get_channel(settings.log_channel)
     if isinstance(channel, discord.TextChannel):
         try:
             await channel.send(message)
         except Exception:
-            log.warning("Could not send to collector log channel", exc_info=True)
+            log.warning("Could not send to log channel", exc_info=True)
+
+
+def _is_admin(interaction: discord.Interaction) -> bool:
+    """
+    Returns True if the user has any of the root or admin roles
+    defined in settings (admin-command.root-role-ids / admin-role-ids).
+    Also returns True if the user is a bot owner.
+    """
+    if interaction.user.id in interaction.client.owner_ids:
+        return True
+    if not isinstance(interaction.user, discord.Member):
+        return False
+    user_role_ids = {r.id for r in interaction.user.roles}
+    allowed = set(settings.root_role_ids) | set(settings.admin_role_ids)
+    return bool(user_role_ids & allowed)
 
 
 # ── Cog ───────────────────────────────────────────────────────────────────────
@@ -116,16 +121,18 @@ class CollectorCog(commands.Cog):
         description="Collector commands",
     )
 
+    # Hidden from non-admins via guild_ids restriction (registered only in
+    # admin guilds) + interaction check, matching how BallsDex itself does it.
     admin_group = app_commands.Group(
         name="admin",
         description="Admin commands",
+        guild_ids=settings.admin_guild_ids or None,
         default_permissions=discord.Permissions(administrator=True),
     )
     admin_collector_group = app_commands.Group(
         name="collector",
         description="Manage collector requirements",
         parent=admin_group,
-        default_permissions=discord.Permissions(administrator=True),
     )
 
     # ── /collector claim ──────────────────────────────────────────────────────
@@ -231,14 +238,24 @@ class CollectorCog(commands.Cog):
         for amount in sorted_amounts:
             reqs = grouped[amount]
             lines = [
-                f"* {_ball_emoji(self.bot, r['ball_id'])} {r['ball_name']}: *{r['special_name']}*"
+                f"* {_ball_emoji(self.bot, r['ball_id'])} {r['ball_name']} → *{r['special_name']}*"
                 for r in reqs
             ]
             entries.append((f"Minimum: {amount}", "\n".join(lines)))
+
+        total_pages = -(-len(entries) // GROUPS_PER_PAGE)  # ceiling division
+        
         source = FieldPageSource(entries, per_page=GROUPS_PER_PAGE, inline=False)
         source.embed.title = "Collector List"
         source.embed.color = discord.Color.gold()
-        
+
+        if total_pages > 1:
+            source.embed.set_footer(
+                text=f"{len(requirements)} requirement(s)"
+            )
+        else:
+            source.embed.set_footer(text=f"{len(requirements)} requirement(s)")
+
         pages = Pages(source, interaction=interaction)
         await pages.start(ephemeral=True)
 
@@ -257,9 +274,9 @@ class CollectorCog(commands.Cog):
         amount: app_commands.Range[int, 1, 9999],
         special: SpecialTransform,
     ):
-        if interaction.user.id not in self.bot.owner_ids:
+        if not _is_admin(interaction):
             await interaction.response.send_message(
-                "Only bot admins can manage collector requirements.", ephemeral=True
+                "You don't have permission to use this command.", ephemeral=True
             )
             return
 
@@ -280,7 +297,6 @@ class CollectorCog(commands.Cog):
             f"Previous claims for this ball have been reset.",
             ephemeral=True,
         )
-
         await _send_admin_log(
             self.bot,
             f"{interaction.user.name} set collector requirement for "
@@ -301,9 +317,9 @@ class CollectorCog(commands.Cog):
         interaction: discord.Interaction["BallsDexBot"],
         countryball: BallTransform,
     ):
-        if interaction.user.id not in self.bot.owner_ids:
+        if not _is_admin(interaction):
             await interaction.response.send_message(
-                "Only bot admins can manage collector requirements.", ephemeral=True
+                "You don't have permission to use this command.", ephemeral=True
             )
             return
 
@@ -322,15 +338,12 @@ class CollectorCog(commands.Cog):
             f"🗑️ Collector requirement for **{ball.country}** has been deleted.",
             ephemeral=True,
         )
-
         await _send_admin_log(
             self.bot,
             f"{interaction.user.name} deleted collector requirement for "
             f"{ball.country}.",
         )
-        log.info(
-            "Admin %s deleted collector: ball=%s", interaction.user, ball.country
-        )
+        log.info("Admin %s deleted collector: ball=%s", interaction.user, ball.country)
 
     # ── /admin collector view ─────────────────────────────────────────────────
 
@@ -341,9 +354,9 @@ class CollectorCog(commands.Cog):
         interaction: discord.Interaction["BallsDexBot"],
         countryball: BallTransform,
     ):
-        if interaction.user.id not in self.bot.owner_ids:
+        if not _is_admin(interaction):
             await interaction.response.send_message(
-                "Only bot admins can view collector requirements.", ephemeral=True
+                "You don't have permission to use this command.", ephemeral=True
             )
             return
 
