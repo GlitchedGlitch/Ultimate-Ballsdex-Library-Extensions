@@ -121,7 +121,7 @@ class CollectorCog(commands.Cog):
         req = collector_requirements[ball_id]
 
         # Check player exists in DB
-        from bd_models.models import BallInstance, Player, Special
+        from ballsdex.core.models import BallInstance, Player, Special
 
         try:
             player = await Player.objects.aget(discord_id=interaction.user.id)
