@@ -244,7 +244,7 @@ class CollectorCog(commands.Cog):
                 f"* {_ball_emoji(self.bot, r['ball_id'])} {r['ball_name']}: *{r['special_name']}*"
                 for r in reqs
             ]
-            entries.append((f"Minimum: {amount}", "\n".join(lines
+            entries.append((f"Minimum: {amount}", "\n".join(lines)))
         source = FieldPageSource(entries, per_page=GROUPS_PER_PAGE, inline=False)
         source.embed.title = "Collector List"
         source.embed.color = discord.Color.gold()
