@@ -3,7 +3,7 @@ Collector package for BallsDex.
 
 Adds two commands:
   /collector claim  — players claim a collector version of a ball if they meet requirements.
-  /collector list   — paginated embed list of all active collector requirements.
+  /collector list   — lists all active collector requirements.
   /admin collector set    — bot admins set a collector requirement and reward.
   /admin collector delete — bot admins delete a collector requirement.
   /admin collector view   — bot admins inspect a specific requirement.
@@ -14,7 +14,6 @@ Requirements are stored on the bot object so they persist across cog reloads.
 from __future__ import annotations
 
 import logging
-from itertools import groupby
 from typing import TYPE_CHECKING
 
 import discord
@@ -22,13 +21,6 @@ from discord import app_commands
 from discord.ext import commands
 
 from ballsdex.core.models import BallInstance, Player, Special
-from ballsdex.core.utils.menus import (
-    ChunkedListSource,
-    ItemFormatter,
-    Menu,
-    dynamic_chunks,
-    iter_to_async,
-)
 from ballsdex.core.utils.transformers import BallTransform, SpecialTransform
 from ballsdex.settings import settings
 
@@ -36,35 +28,6 @@ if TYPE_CHECKING:
     from ballsdex.core.bot import BallsDexBot
 
 log = logging.getLogger("ballsdex.packages.collector")
-
-GROUPS_PER_PAGE = 7
-
-
-def _get_ball_emoji(bot: "BallsDexBot", ball_id: int) -> str:
-    """Try to resolve the ball's Discord emoji, fall back to a plain bullet."""
-    from ballsdex.core.models import balls as balls_cache
-    ball = balls_cache.get(ball_id)
-    if ball and ball.emoji_id:
-        emoji = bot.get_emoji(ball.emoji_id)
-        if emoji:
-            return str(emoji)
-    return "•"
-
-
-async def _generate_list_items(
-    bot: "BallsDexBot",
-    grouped: dict[int, list[dict]],
-    sorted_amounts: list[int],
-):
-    """Yield TextDisplay items for each minimum-amount group."""
-    for amount in sorted_amounts:
-        entries = grouped[amount]
-        lines = [f"**Minimum: {amount}**"]
-        for req in entries:
-            emoji = _get_ball_emoji(bot, req["ball_id"])
-            lines.append(f"* {emoji} {req['ball_name']}")
-        yield discord.ui.TextDisplay("\n".join(lines))
-        yield discord.ui.Separator()
 
 
 class CollectorCog(commands.Cog):
@@ -117,6 +80,7 @@ class CollectorCog(commands.Cog):
         requirements = self.bot.collector_requirements
         claimed = self.bot.collector_claimed
 
+        # Check requirement exists
         if ball_id not in requirements:
             await interaction.followup.send(
                 f"There is no collector requirement set for **{ball.country}**.",
@@ -125,8 +89,11 @@ class CollectorCog(commands.Cog):
             return
 
         req = requirements[ball_id]
+
+        # Get or create player
         player, _ = await Player.get_or_create(discord_id=interaction.user.id)
 
+        # Check if already claimed
         already_claimed = claimed.get(ball_id, set())
         if interaction.user.id in already_claimed:
             await interaction.followup.send(
@@ -135,6 +102,7 @@ class CollectorCog(commands.Cog):
             )
             return
 
+        # Count how many of this ball the player owns
         count = await BallInstance.filter(
             player=player,
             ball=ball,
@@ -150,6 +118,7 @@ class CollectorCog(commands.Cog):
             )
             return
 
+        # Fetch the reward Special
         special = await Special.get_or_none(pk=req["special_id"])
         if special is None:
             await interaction.followup.send(
@@ -163,6 +132,7 @@ class CollectorCog(commands.Cog):
             )
             return
 
+        # Award — create a new BallInstance with the special
         new_instance = await BallInstance.create(
             player=player,
             ball=ball,
@@ -172,6 +142,7 @@ class CollectorCog(commands.Cog):
             server_id=interaction.guild_id,
         )
 
+        # Mark as claimed
         claimed.setdefault(ball_id, set()).add(interaction.user.id)
 
         log.info(
@@ -186,7 +157,7 @@ class CollectorCog(commands.Cog):
         collectible = settings.collectible_name
         emoji_str = special.emoji or ""
         await interaction.followup.send(
-            f"🎉 Congratulations! You have claimed your "
+            f"Congratulations! You have claimed your "
             f"**{emoji_str} {special.name} {ball.country}** "
             f"collector {collectible}!\n"
             f"It has been added to your collection as `#{new_instance.pk:0X}`.",
@@ -199,14 +170,7 @@ class CollectorCog(commands.Cog):
         name="list",
         description="List all active collector requirements",
     )
-    @app_commands.describe(
-        reverse="Sort from highest to lowest amount instead of lowest to highest",
-    )
-    async def collector_list(
-        self,
-        interaction: discord.Interaction["BallsDexBot"],
-        reverse: bool = False,
-    ):
+    async def collector_list(self, interaction: discord.Interaction["BallsDexBot"]):
         await interaction.response.defer(ephemeral=True)
 
         requirements = self.bot.collector_requirements
@@ -219,110 +183,14 @@ class CollectorCog(commands.Cog):
             return
 
         collectible = settings.collectible_name
-
-        # Group requirements by amount, sorted low→high (or reversed)
-        all_reqs = sorted(
-            requirements.values(),
-            key=lambda r: r["amount"],
-            reverse=reverse,
-        )
-        grouped: dict[int, list[dict]] = {}
-        for req in all_reqs:
-            grouped.setdefault(req["amount"], []).append(req)
-        sorted_amounts = list(grouped.keys())
-
-        # Split sorted_amounts into pages of GROUPS_PER_PAGE
-        amount_pages = [
-            sorted_amounts[i : i + GROUPS_PER_PAGE]
-            for i in range(0, len(sorted_amounts), GROUPS_PER_PAGE)
-        ]
-        total_pages = len(amount_pages)
-        sort_label = "Highest → Lowest" if reverse else "Lowest → Highest"
-
-        # Build one embed per page
-        pages: list[discord.Embed] = []
-        for page_num, page_amounts in enumerate(amount_pages, start=1):
-            embed = discord.Embed(
-                title="🏆 Collector List",
-                color=discord.Color.gold(),
-            )
-            embed.set_footer(
-                text=(
-                    f"Page {page_num}/{total_pages} • "
-                    f"{len(requirements)} requirement(s) • "
-                    f"Sorted: {sort_label}"
-                )
+        lines = [f"**Active Collector Requirements** ({len(requirements)} total)\n"]
+        for req in requirements.values():
+            lines.append(
+                f"• **{req['ball_name']}** — own ≥ {req['amount']} {collectible}(s) → "
+                f"reward: **{req['special_name']}** special"
             )
 
-            for amount in page_amounts:
-                entries = grouped[amount]
-                ball_lines = []
-                for req in entries:
-                    emoji = _get_ball_emoji(self.bot, req["ball_id"])
-                    reward_emoji = ""
-                    # Try to get reward special emoji
-                    special_name = req["special_name"]
-                    # Look for emoji in special data if we can
-                    ball_lines.append(f"* {emoji} {req['ball_name']} → *{special_name}*")
-
-                embed.add_field(
-                    name=f"Minimum: {amount}",
-                    value="\n".join(ball_lines),
-                    inline=False,
-                )
-
-            pages.append(embed)
-
-        if total_pages == 1:
-            await interaction.followup.send(embed=pages[0], ephemeral=True)
-            return
-
-        # Multi-page: use a simple previous/next view
-        class PaginatorView(discord.ui.View):
-            def __init__(self):
-                super().__init__(timeout=180)
-                self.page = 0
-                self.message: discord.WebhookMessage | None = None
-                self._update_buttons()
-
-            def _update_buttons(self):
-                self.prev_button.disabled = self.page == 0
-                self.next_button.disabled = self.page == total_pages - 1
-
-            async def on_timeout(self):
-                for child in self.children:
-                    child.disabled = True
-                if self.message:
-                    try:
-                        await self.message.edit(view=self)
-                    except Exception:
-                        pass
-
-            async def interaction_check(self, itx: discord.Interaction) -> bool:
-                if itx.user.id != interaction.user.id:
-                    await itx.response.send_message(
-                        "This menu is not for you.", ephemeral=True
-                    )
-                    return False
-                return True
-
-            @discord.ui.button(emoji="⬅️", style=discord.ButtonStyle.secondary)
-            async def prev_button(self, itx: discord.Interaction, button: discord.ui.Button):
-                self.page -= 1
-                self._update_buttons()
-                await itx.response.edit_message(embed=pages[self.page], view=self)
-
-            @discord.ui.button(emoji="➡️", style=discord.ButtonStyle.secondary)
-            async def next_button(self, itx: discord.Interaction, button: discord.ui.Button):
-                self.page += 1
-                self._update_buttons()
-                await itx.response.edit_message(embed=pages[self.page], view=self)
-
-        view = PaginatorView()
-        msg = await interaction.followup.send(
-            embed=pages[0], view=view, ephemeral=True, wait=True
-        )
-        view.message = msg
+        await interaction.followup.send("\n".join(lines), ephemeral=True)
 
     # ── /admin collector set ──────────────────────────────────────────────────
 
@@ -359,11 +227,12 @@ class CollectorCog(commands.Cog):
             "special_id": special.pk,
             "special_name": special.name,
         }
+        # Reset claimed set when requirement changes
         self.bot.collector_claimed.pop(ball_id, None)
 
         collectible = settings.collectible_name
         await interaction.response.send_message(
-            f"✅ Collector requirement set:\n"
+            f"Collector requirement set:\n"
             f"**{ball.country}** — own ≥ **{amount}** {collectible}(s) "
             f"→ reward **{special.name}** special.\n"
             f"Previous claims for this ball have been reset.",
