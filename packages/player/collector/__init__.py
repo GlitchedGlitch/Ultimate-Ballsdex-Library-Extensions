@@ -1,24 +1,27 @@
 from typing import TYPE_CHECKING
 from discord import app_commands
-from .cog import CollectorCog
+from .cog import CollectorAdminGroup, CollectorCog
 
 if TYPE_CHECKING:
     from ballsdex.core.bot import BallsDexBot
 
 
 async def setup(bot: "BallsDexBot"):
-    cog = CollectorCog(bot)
-
-    # Attach /admin collector to the existing /admin group
+    # Attach /admin collector to the already-registered /admin group
+    # without re-registering /admin itself (which would crash with
+    # CommandAlreadyRegistered)
     admin_group = bot.tree.get_command("admin")
     if isinstance(admin_group, app_commands.Group):
-        # Build a Group from the cog's admin_collector_group commands
-        collector_group = app_commands.Group(
-            name="collector",
-            description="Manage collector requirements",
+        admin_group.add_command(CollectorAdminGroup(bot))
+    else:
+        import logging
+        logging.getLogger("ballsdex.packages.collector").warning(
+            "Could not find /admin group in bot tree. "
+            "/admin collector commands will NOT be registered. "
+            "Ensure ballsdex.packages.admin is loaded before ballsdex.packages.collector "
+            "in config.yml."
         )
-        for cmd in cog.admin_collector_group.commands:
-            collector_group.add_command(cmd)
-        admin_group.add_command(collector_group)
 
-    await bot.add_cog(cog)
+    # CollectorCog only contains /collector commands — no admin group inside,
+    # so add_cog will not try to register /admin again
+    await bot.add_cog(CollectorCog(bot))
