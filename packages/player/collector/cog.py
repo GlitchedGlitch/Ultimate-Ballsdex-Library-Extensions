@@ -23,7 +23,6 @@ from discord.ext import commands
 
 from ballsdex.core.models import BallInstance, Player, Special
 from ballsdex.core.utils.menus import (
-    ChunkedListSource,
     ItemFormatter,
     Menu,
     dynamic_chunks,
