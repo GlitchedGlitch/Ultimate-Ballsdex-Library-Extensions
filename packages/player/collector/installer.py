@@ -69,7 +69,7 @@ embed = discord.Embed(
     ),
     color=discord.Color.gold() if installed else discord.Color.red(),
 )
-embed.set_footer(text="Ultimate BallsDex Library Extensions • by GlitchedGlitch")
+embed.set_footer(text="Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)")
 
 
 class CollectorInstallerView(View):
