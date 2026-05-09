@@ -1,12 +1,15 @@
-import base64, os, requests, discord
+import base64, io, json, os, requests, traceback, discord
 from discord.ui import View, Button
 
 REPO = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
 BASE = "https://api.github.com/repos/{}/contents/packages/player/collector/{}".format(REPO, "{}")
 PKG = "/code/ballsdex/packages/collector"
 CONFIG = "/code/config.yml"
+REQUIREMENTS_FILE = os.path.join(PKG, "requirements.txt")
 PACKAGE_ENTRY = "  - ballsdex.packages.collector"
 FILES = ("__init__.py", "cog.py")
+FOOTER = "Ultimate BallsDex Library Extensions • by GlitchedGlitch"
+FOOTER_TIMEOUT = FOOTER + " • Timed out"
 
 
 def is_installed():
@@ -15,10 +18,18 @@ def is_installed():
 
 def download_files():
     for f in FILES:
-        response = requests.get(BASE.format(f))
-        content = base64.b64decode(response.json()["content"]).decode()
-        with open(os.path.join(PKG, f), "w") as file:
-            file.write(content)
+        resp = requests.get(BASE.format(f))
+        resp.raise_for_status()
+        content = base64.b64decode(resp.json()["content"]).decode()
+        with open(os.path.join(PKG, f), "w") as fh:
+            fh.write(content)
+
+
+def ensure_requirements_file():
+    """Create requirements.txt if it doesn't exist yet (preserves existing data)."""
+    if not os.path.isfile(REQUIREMENTS_FILE):
+        with open(REQUIREMENTS_FILE, "w") as f:
+            f.write("{}")
 
 
 def add_to_config():
@@ -44,19 +55,15 @@ def delete_files():
         shutil.rmtree(PKG)
 
 
-FOOTER = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
-FOOTER_TIMEOUT = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch) • Timed out"
-
-
 def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
     embed = discord.Embed(
         title="Collector Package",
         description=(
             "Adds a collector system to your BallsDex instance.\n\n"
             "**Commands**\n"
-            "• `/collector claim` — claim a special collector version of a ball\n"
-            "• `/collector list` — view all active collector requirements\n"
-            "• `/admin collector set` — set a requirement and reward special\n"
+            "• `/collector claim` — claim a collector ball\n"
+            "• `/collector list` — view all active requirements\n"
+            "• `/admin collector set` — set a requirement and reward\n"
             "• `/admin collector delete` — remove a requirement\n"
             "• `/admin collector view` — inspect a requirement\n\n"
             "**How it works**\n"
@@ -89,48 +96,23 @@ def build_confirm_embed() -> discord.Embed:
     return embed
 
 
-def build_installed_embed() -> discord.Embed:
+def build_error_embed(action: str, error: str) -> discord.Embed:
+    short = error[:1000] + "..." if len(error) > 1000 else error
     embed = discord.Embed(
-        title="Successfully Installed",
+        title="An error occurred",
         description=(
-            "The **Collector Package** has been installed and loaded.\n\n"
-            "You can now use `/collector claim`, `/collector list` "
-            "and the `/admin collector` commands.\n\n"
-            "Run this installer again if you want to update or remove the package."
-        ),
-        color=discord.Color.green(),
-    )
-    embed.set_footer(text=FOOTER)
-    return embed
-
-
-def build_updated_embed() -> discord.Embed:
-    embed = discord.Embed(
-        title="Successfully Updated",
-        description=(
-            "The **Collector Package** has been updated and reloaded.\n\n"
-            "All commands are running on the latest version.\n\n"
-            "Run this installer again if you want to update or remove the package."
-        ),
-        color=discord.Color.blue(),
-    )
-    embed.set_footer(text=FOOTER)
-    return embed
-
-
-def build_deleted_embed() -> discord.Embed:
-    embed = discord.Embed(
-        title="Successfully Deleted",
-        description=(
-            "The **Collector Package** has been removed.\n\n"
-            "• All package files have been deleted\n"
-            "• The entry has been removed from `config.yml`\n"
-            "• All active collector requirements have been wiped\n\n"
-            "Restart the bot to fully apply the config change.\n\n"
-            "Run this installer again if you want to reinstall the package."
+            f"An error occurred when **{action}** the package!\n\n"
+            f"```\n{short}\n```\n\n"
+            "The full error is attached as a `.txt` file below."
         ),
         color=discord.Color.red(),
     )
+    embed.set_footer(text=FOOTER)
+    return embed
+
+
+def build_result_embed(title: str, description: str, color: discord.Color) -> discord.Embed:
+    embed = discord.Embed(title=title, description=description, color=color)
     embed.set_footer(text=FOOTER)
     return embed
 
@@ -141,22 +123,14 @@ class ConfirmDeleteView(View):
         self.parent = parent
 
     async def on_timeout(self):
-        for child in self.children:
-            child.disabled = True
-        await self.parent.message.edit(
-            embed=build_main_embed(
-                self.parent.installed,
-                discord.Color.gold() if self.parent.installed else discord.Color.greyple(),
-            ),
-            view=self.parent,
-        )
+        for c in self.children:
+            c.disabled = True
+        color = discord.Color.gold() if self.parent.installed else discord.Color.greyple()
+        await self.parent.message.edit(embed=build_main_embed(self.parent.installed, color), view=self.parent)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.parent.ctx.author.id:
-            await interaction.response.send_message(
-                "Only the person who ran this command can use these buttons.",
-                ephemeral=True,
-            )
+            await interaction.response.send_message("This menu is not for you.", ephemeral=True)
             return False
         return True
 
@@ -167,25 +141,42 @@ class ConfirmDeleteView(View):
             await self.parent.bot.unload_extension("ballsdex.packages.collector")
         except Exception:
             pass
-        delete_files()
-        remove_from_config()
-        if hasattr(self.parent.bot, "collector_requirements"):
-            del self.parent.bot.collector_requirements
-        if hasattr(self.parent.bot, "collector_claimed"):
-            del self.parent.bot.collector_claimed
-        self.stop()
-        await self.parent.message.edit(embed=build_deleted_embed(), view=None)
+        try:
+            delete_files()
+            remove_from_config()
+            if hasattr(self.parent.bot, "collector_requirements"):
+                del self.parent.bot.collector_requirements
+            if hasattr(self.parent.bot, "collector_claimed"):
+                del self.parent.bot.collector_claimed
+            self.parent.installed = False
+            self.parent._update_buttons()
+            self.stop()
+            await self.parent.message.edit(
+                embed=build_result_embed(
+                    "Successfully Deleted",
+                    (
+                        "The **Collector Package** has been removed.\n\n"
+                        "• All package files deleted\n"
+                        "• Removed from `config.yml`\n"
+                        "• All requirements wiped\n\n"
+                        "Restart the bot to fully apply the config change.\n\n"
+                        "Run this installer again to reinstall."
+                    ),
+                    discord.Color.red(),
+                ),
+                view=None,
+            )
+        except Exception:
+            err = traceback.format_exc()
+            f = discord.File(io.BytesIO(err.encode()), filename="delete_error.txt")
+            await self.parent.message.edit(embed=build_error_embed("deleting", err), view=None)
+            await interaction.followup.send(file=f)
 
     @discord.ui.button(label="No, go back", style=discord.ButtonStyle.secondary, emoji="↩️")
     async def cancel_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
-        await self.parent.message.edit(
-            embed=build_main_embed(
-                self.parent.installed,
-                discord.Color.gold() if self.parent.installed else discord.Color.greyple(),
-            ),
-            view=self.parent,
-        )
+        color = discord.Color.gold() if self.parent.installed else discord.Color.greyple()
+        await self.parent.message.edit(embed=build_main_embed(self.parent.installed, color), view=self.parent)
 
 
 class CollectorInstallerView(View):
@@ -198,15 +189,15 @@ class CollectorInstallerView(View):
         self._update_buttons()
 
     def _update_buttons(self):
-        for child in self.children:
-            if child.label == "Install":
-                child.disabled = self.installed
-            elif child.label in ("Update", "Delete"):
-                child.disabled = not self.installed
+        for c in self.children:
+            if c.label == "Install":
+                c.disabled = self.installed
+            elif c.label in ("Update", "Delete"):
+                c.disabled = not self.installed
 
     async def on_timeout(self):
-        for child in self.children:
-            child.disabled = True
+        for c in self.children:
+            c.disabled = True
         if self.message:
             embed = build_main_embed(self.installed, discord.Color.dark_grey())
             embed.set_footer(text=FOOTER_TIMEOUT)
@@ -214,44 +205,73 @@ class CollectorInstallerView(View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.ctx.author.id:
-            await interaction.response.send_message(
-                "Only the person who ran this command can use these buttons.",
-                ephemeral=True,
-            )
+            await interaction.response.send_message("This menu is not for you.", ephemeral=True)
             return False
         return True
 
     @discord.ui.button(label="Install", style=discord.ButtonStyle.success, emoji="📥")
     async def install_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
-        os.makedirs(PKG, exist_ok=True)
-        download_files()
-        add_to_config()
         try:
+            os.makedirs(PKG, exist_ok=True)
+            download_files()
+            ensure_requirements_file()
+            add_to_config()
             await self.bot.load_extension("ballsdex.packages.collector")
+            self.stop()
+            await self.message.edit(
+                embed=build_result_embed(
+                    "Successfully Installed",
+                    (
+                        "The **Collector Package** has been installed and loaded.\n\n"
+                        "You can now use `/collector claim`, `/collector list` "
+                        "and the `/admin collector` commands.\n\n"
+                        "Run this installer again to update or remove the package."
+                    ),
+                    discord.Color.green(),
+                ),
+                view=None,
+            )
         except Exception:
-            await self.bot.reload_extension("ballsdex.packages.collector")
-        self.stop()
-        await self.message.edit(embed=build_installed_embed(), view=None)
+            err = traceback.format_exc()
+            f = discord.File(io.BytesIO(err.encode()), filename="install_error.txt")
+            await self.message.edit(embed=build_error_embed("installing", err), view=None)
+            await interaction.followup.send(file=f)
 
     @discord.ui.button(label="Update", style=discord.ButtonStyle.primary, emoji="🔄")
     async def update_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
-        download_files()
         try:
-            await self.bot.reload_extension("ballsdex.packages.collector")
+            download_files()
+            # reload if loaded, load if not
+            loaded = "ballsdex.packages.collector" in [e for e in self.bot.extensions]
+            if loaded:
+                await self.bot.reload_extension("ballsdex.packages.collector")
+            else:
+                await self.bot.load_extension("ballsdex.packages.collector")
+            self.stop()
+            await self.message.edit(
+                embed=build_result_embed(
+                    "Successfully Updated",
+                    (
+                        "The **Collector Package** has been updated and reloaded.\n\n"
+                        "All commands are now running the latest version.\n\n"
+                        "Run this installer again to update or remove the package."
+                    ),
+                    discord.Color.blue(),
+                ),
+                view=None,
+            )
         except Exception:
-            await self.bot.load_extension("ballsdex.packages.collector")
-        self.stop()
-        await self.message.edit(embed=build_updated_embed(), view=None)
+            err = traceback.format_exc()
+            f = discord.File(io.BytesIO(err.encode()), filename="update_error.txt")
+            await self.message.edit(embed=build_error_embed("updating", err), view=None)
+            await interaction.followup.send(file=f)
 
     @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger, emoji="🗑️")
     async def delete_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
-        await self.message.edit(
-            embed=build_confirm_embed(),
-            view=ConfirmDeleteView(self),
-        )
+        await self.message.edit(embed=build_confirm_embed(), view=ConfirmDeleteView(self))
 
 
 installed = is_installed()
