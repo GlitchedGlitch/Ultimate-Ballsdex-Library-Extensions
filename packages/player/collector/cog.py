@@ -248,10 +248,7 @@ class CollectorCog(commands.Cog):
         source = FieldPageSource(entries, per_page=GROUPS_PER_PAGE, inline=False)
         source.embed.title = "Collector List"
         source.embed.color = discord.Color.gold()
-        source.embed.set_footer(
-            text=f"{len(requirements)} requirement(s)"
-        )
-
+        
         pages = Pages(source, interaction=interaction)
         await pages.start(ephemeral=True)
 
