@@ -245,7 +245,7 @@ class CollectorCog(commands.Cog):
                 for r in reqs
             ]
             entries.append((f"Minimum: {amount}", "\n".join(lines)))
-
+        sort_label = " "
         source = FieldPageSource(entries, per_page=GROUPS_PER_PAGE, inline=False)
         source.embed.title = "Collector List"
         source.embed.color = discord.Color.gold()
