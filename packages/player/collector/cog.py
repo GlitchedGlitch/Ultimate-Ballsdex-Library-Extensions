@@ -244,13 +244,12 @@ class CollectorCog(commands.Cog):
                 f"* {_ball_emoji(self.bot, r['ball_id'])} {r['ball_name']}: *{r['special_name']}*"
                 for r in reqs
             ]
-            entries.append((f"Minimum: {amount}", "\n".join(lines)))
-        sort_label = " "
+            entries.append((f"Minimum: {amount}", "\n".join(lines
         source = FieldPageSource(entries, per_page=GROUPS_PER_PAGE, inline=False)
         source.embed.title = "Collector List"
         source.embed.color = discord.Color.gold()
         source.embed.set_footer(
-            text=f"{len(requirements)} requirement(s) • Sorted: {sort_label}"
+            text=f"{len(requirements)} requirement(s)"
         )
 
         pages = Pages(source, interaction=interaction)
