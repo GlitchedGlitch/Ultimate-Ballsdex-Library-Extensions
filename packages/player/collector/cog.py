@@ -1,7 +1,7 @@
 """
 Collector package for BallsDex.
 
-Adds five commands:
+Adds two commands:
   /collector claim  — players claim a collector version of a ball if they meet requirements.
   /collector list   — paginated embed list of all active collector requirements.
   /admin collector set    — bot admins set a collector requirement and reward.
