@@ -216,7 +216,7 @@ class CollectorCog(commands.Cog):
     # ── /collector list ───────────────────────────────────────────────────────
 
     @collector_group.command(name="list", description="List all active collector requirements")
-    @app_commands.describe(reverse="Sort from highest to lowest amount (default: lowest first)")
+    @app_commands.describe(reverse="Reverse the output of the list")
     async def collector_list(
         self,
         interaction: discord.Interaction["BallsDexBot"],
@@ -241,14 +241,13 @@ class CollectorCog(commands.Cog):
         for amount in sorted_amounts:
             reqs = grouped[amount]
             lines = [
-                f"* {_ball_emoji(self.bot, r['ball_id'])} {r['ball_name']} → *{r['special_name']}*"
+                f"* {_ball_emoji(self.bot, r['ball_id'])} {r['ball_name']}: *{r['special_name']}*"
                 for r in reqs
             ]
             entries.append((f"Minimum: {amount}", "\n".join(lines)))
 
-        sort_label = "Highest → Lowest" if reverse else "Lowest → Highest"
         source = FieldPageSource(entries, per_page=GROUPS_PER_PAGE, inline=False)
-        source.embed.title = "🏆 Collector List"
+        source.embed.title = "Collector List"
         source.embed.color = discord.Color.gold()
         source.embed.set_footer(
             text=f"{len(requirements)} requirement(s) • Sorted: {sort_label}"
