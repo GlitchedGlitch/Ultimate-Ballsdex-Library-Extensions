@@ -195,16 +195,6 @@ class CollectorCog(commands.Cog):
             interaction.user, interaction.user.id, ball.country, special.name, new_instance.pk,
         )
 
-        # Log to admin channel
-        await _send_admin_log(
-            self.bot,
-            f"{interaction.user.name} claimed {ball.country} "
-            f"`(#{new_instance.pk:0X})`. "
-            f"(Special={special.name} "
-            f"ATK={new_instance.attack_bonus:+d} "
-            f"HP={new_instance.health_bonus:+d})",
-        )
-
         emoji_str = special.emoji or ""
         await interaction.followup.send(
             f"🎉 Congratulations! You claimed your **{emoji_str} {special.name} {ball.country}** "
@@ -294,7 +284,7 @@ class CollectorCog(commands.Cog):
         await _send_admin_log(
             self.bot,
             f"{interaction.user.name} set collector requirement for "
-            f"{ball.country} `({ball.pk:0X})`. "
+            f"{ball.country}. "
             f"(Minimum={amount} Special={special.name})",
         )
         log.info(
