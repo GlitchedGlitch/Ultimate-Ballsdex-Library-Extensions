@@ -326,7 +326,7 @@ class CollectorCog(commands.Cog):
         await _send_admin_log(
             self.bot,
             f"{interaction.user.name} deleted collector requirement for "
-            f"{ball.country} `({ball.pk:0X})`.",
+            f"{ball.country}.",
         )
         log.info(
             "Admin %s deleted collector: ball=%s", interaction.user, ball.country
