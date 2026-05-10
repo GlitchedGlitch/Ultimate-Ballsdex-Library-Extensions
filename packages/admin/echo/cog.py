@@ -138,7 +138,7 @@ def EchoAdminCommand(bot: "BallsDexBot") -> app_commands.Command:
                     )
                 else:
                     await edit_msg.edit(content=message, embed=None)
-                await interaction.followup.send("✅ Message edited!", ephemeral=True)
+                await interaction.followup.send("Message edited!", ephemeral=True)
             except discord.Forbidden:
                 await interaction.followup.send(
                     "Missing permissions to edit that message.", ephemeral=True
@@ -177,7 +177,7 @@ def EchoAdminCommand(bot: "BallsDexBot") -> app_commands.Command:
 
         try:
             await target.send(**kwargs)
-            await interaction.followup.send("✅ Message sent!", ephemeral=True)
+            await interaction.followup.send("Message sent!", ephemeral=True)
         except discord.Forbidden:
             await interaction.followup.send(
                 f"Missing permissions to send in {target.mention}.", ephemeral=True
