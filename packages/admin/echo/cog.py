@@ -2,10 +2,10 @@
 Echo package for BallsDex.
 
 Commands:
-  /admin echo — send, edit or reply to messages as the bot (admin only)
+  /admin <name> — send, edit or reply to messages as the bot (admin only)
 
-Logs every successful action to the configured log channel showing:
-  user, message content, target channel, whether it was an edit, reply target
+The command name is configurable via the installer and stored in name.txt.
+Logs every successful action to the configured log channel.
 """
 
 from __future__ import annotations
@@ -61,8 +61,11 @@ class EchoCog(commands.Cog):
         self.bot = bot
 
 
-def EchoAdminCommand(bot: "BallsDexBot") -> app_commands.Command:
-    @app_commands.command(name="echo", description="Send, edit or reply to messages as the bot")
+def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Command:
+    @app_commands.command(
+        name=name,
+        description="Send, edit or reply to messages as the bot",
+    )
     @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
     @app_commands.describe(
         message="The text content to send or use when editing",
@@ -163,7 +166,6 @@ def EchoAdminCommand(bot: "BallsDexBot") -> app_commands.Command:
             await target.send(**kwargs)
             await interaction.followup.send("Message sent!", ephemeral=True)
 
-            # Build log line
             parts = [
                 f"{interaction.user.name} sent a message in #{target} ({target.id}).",
                 f"Content: {message!r}" if message else "Content: [image only]",
@@ -185,4 +187,6 @@ def EchoAdminCommand(bot: "BallsDexBot") -> app_commands.Command:
         except Exception as e:
             await interaction.followup.send(f"Error:\n```py\n{e}\n```", ephemeral=True)
 
+    # Mark so __init__.py can find and remove it by tag on reload
+    echo._is_echo = True  # type: ignore
     return echo
