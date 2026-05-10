@@ -1,5 +1,5 @@
 """
-Echo package for BallsDex.
+Echo package for BallsDex (v2.30 compatible).
 
 Commands:
   /admin <name> — send, edit, delete or reply to messages as the bot (admin only)
