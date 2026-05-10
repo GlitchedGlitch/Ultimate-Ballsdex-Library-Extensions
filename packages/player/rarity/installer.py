@@ -7,7 +7,7 @@ PKG = "/code/ballsdex/packages/rarity"
 CONFIG = "/code/config.yml"
 PACKAGE_ENTRY = "  - ballsdex.packages.rarity"
 FILES = ("__init__.py", "cog.py")
-FOOTER = "Ultimate BallsDex Library Extensions • by GlitchedGlitch"
+FOOTER = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
 FOOTER_TIMEOUT = FOOTER + " • Timed out"
 
 BAR_FILLED = "█"
@@ -95,7 +95,7 @@ def _remove_rarity_command(bot):
 
 def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
     embed = discord.Embed(
-        title="📊 Rarity Package",
+        title="Rarity Package",
         description=(
             "Adds a rarity list command to your BallsDex instance.\n\n"
             "**Commands**\n"
@@ -114,7 +114,7 @@ def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
 
 def build_confirm_embed() -> discord.Embed:
     embed = discord.Embed(
-        title="🗑️ Delete Rarity Package",
+        title="Delete Rarity Package",
         description=(
             "⚠️ **Are you sure you want to delete the Rarity package?**\n\n"
             "This will:\n"
@@ -133,7 +133,7 @@ def build_confirm_embed() -> discord.Embed:
 def build_error_embed(action: str, error: str) -> discord.Embed:
     short = error[:1000] + "..." if len(error) > 1000 else error
     embed = discord.Embed(
-        title="❌ An error occurred",
+        title="An error occurred",
         description=(
             f"An error occurred when **{action}** the package!\n\n"
             f"```\n{short}\n```\n\n"
@@ -307,12 +307,12 @@ class RarityInstallerView(View):
         async def update(i: int, success: bool = True):
             steps[i] = (steps[i][0], success)
             await self.message.edit(
-                embed=_progress_embed("📥 Installing Rarity Package…", steps, discord.Color.blurple()),
+                embed=_progress_embed("Installing Rarity Package…", steps, discord.Color.blurple()),
                 view=None,
             )
 
         await self.message.edit(
-            embed=_progress_embed("📥 Installing Rarity Package…", steps, discord.Color.blurple()),
+            embed=_progress_embed("Installing Rarity Package…", steps, discord.Color.blurple()),
             view=None,
         )
 
@@ -336,7 +336,7 @@ class RarityInstallerView(View):
             self.stop()
             await self.message.edit(
                 embed=build_result_embed(
-                    "✅ Successfully Installed",
+                    "Successfully Installed",
                     (
                         "The **Rarity Package** has been installed and loaded.\n\n"
                         "Run this installer again to update or remove the package."
@@ -371,12 +371,12 @@ class RarityInstallerView(View):
         async def update(i: int, success: bool = True):
             steps[i] = (steps[i][0], success)
             await self.message.edit(
-                embed=_progress_embed("🔄 Updating Rarity Package…", steps, discord.Color.blurple()),
+                embed=_progress_embed("Updating Rarity Package…", steps, discord.Color.blurple()),
                 view=None,
             )
 
         await self.message.edit(
-            embed=_progress_embed("🔄 Updating Rarity Package…", steps, discord.Color.blurple()),
+            embed=_progress_embed("Updating Rarity Package…", steps, discord.Color.blurple()),
             view=None,
         )
 
@@ -398,7 +398,7 @@ class RarityInstallerView(View):
             self.stop()
             await self.message.edit(
                 embed=build_result_embed(
-                    "🔄 Successfully Updated",
+                    "Successfully Updated",
                     (
                         "The **Rarity Package** has been updated and reloaded.\n\n"
                         "Run this installer again to update or remove the package."
