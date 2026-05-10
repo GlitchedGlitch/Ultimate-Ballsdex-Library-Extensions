@@ -12,30 +12,33 @@ async def setup(bot: "BallsDexBot"):
 
     log = logging.getLogger("ballsdex.packages.rarity")
 
-    # Find the existing balls/objects group (settings.players_group_cog_name)
-    group_name = settings.players_group_cog_name  # e.g. "objects" or "balls"
-    balls_group = bot.tree.get_command(group_name)
+    # The balls/objects group is a GroupCog — find it by cog name "Players"
+    # and attach rarity to its __cog_app_commands_group__, same as admin subgroups
+    players_cog = bot.get_cog("Players")
+    if players_cog and players_cog.__cog_app_commands_group__:
+        group = players_cog.__cog_app_commands_group__
 
-    if balls_group is None:
-        log.warning(
-            "Could not find /%s command group in bot tree. "
-            "/objects rarity will NOT be registered. "
-            "Ensure ballsdex.packages.balls (or equivalent) is loaded before "
-            "ballsdex.packages.rarity in config.yml.",
-            group_name,
+        # Remove existing rarity command to avoid conflicts on reload
+        if group.get_command("rarity") is not None:
+            group.remove_command("rarity")
+            log.info("Removed existing rarity command before re-adding")
+
+        from .cog import build_rarity_command
+        group.add_command(build_rarity_command(bot))
+        log.info(
+            "Attached rarity command to /%s group",
+            settings.players_group_cog_name,
         )
     else:
-        from discord import app_commands
-        # Remove any pre-existing rarity command to avoid conflicts
-        existing = balls_group.get_command("rarity")  # type: ignore
-        if existing is not None:
-            balls_group.remove_command("rarity")  # type: ignore
-            log.info("Removed existing /%s rarity before re-adding", group_name)
+        log.warning(
+            "Could not find Players cog or its command group. "
+            "rarity command will NOT be registered. "
+            "Ensure ballsdex.packages.players is loaded before "
+            "ballsdex.packages.rarity in config.yml."
+        )
 
-    cog = RarityCog(bot)
-    await bot.add_cog(cog)
+    await bot.add_cog(RarityCog(bot))
 
-    # Sync so the command appears immediately
     try:
         await bot.tree.sync()
         log.info("Command tree synced after rarity setup")
