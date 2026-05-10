@@ -83,7 +83,14 @@ class CollectorAdminGroup(app_commands.Group):
     """Manage collector requirements"""
 
     def __init__(self, bot: "BallsDexBot"):
-        super().__init__(name="collector", description="Manage collector requirements")
+        super().__init__(
+            name="collector",
+            description="Manage collector requirements",
+            # Setting manage_guild hides it from regular users by default.
+            # Discord server settings can then grant visibility to specific roles.
+            # The has_any_role check below enforces the actual access control.
+            default_permissions=discord.Permissions(manage_guild=True),
+        )
         self.bot = bot
 
     @app_commands.command(name="set", description="Set or update a collector requirement")
@@ -275,7 +282,7 @@ class CollectorCog(commands.Cog):
 
         emoji_str = special.emoji or ""
         await interaction.followup.send(
-            f"🎉 Congratulations! You claimed your **{emoji_str} {special.name} {ball.country}** "
+            f"Congratulations! You claimed your **{emoji_str} {special.name} {ball.country}** "
             f"collector {settings.collectible_name}!\n"
             f"Added to your collection as `#{new_instance.pk:0X}`.",
             ephemeral=True,
