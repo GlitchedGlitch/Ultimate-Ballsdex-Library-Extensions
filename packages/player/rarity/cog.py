@@ -49,8 +49,8 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
     )
     @app_commands.describe(
         search="Search by ball name or rarity value",
-        reverse="Sort from highest to lowest rarity (default: lowest first)",
-        ephemeral="Show the result only to you (default: False)",
+        reverse="Reverse the output of the list",
+        ephemeral="Whether or not to send the command ephemerally.",
     )
     async def rarity(
         interaction: discord.Interaction,
@@ -137,22 +137,11 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
             ]
             entries.append((f"∥ Rarity: {r}", "\n".join(lines)))
 
-        sort_label = "Highest → Lowest" if reverse else "Lowest → Highest"
         total_pages = -(-len(entries) // GROUPS_PER_PAGE)
 
         source = FieldPageSource(entries, per_page=GROUPS_PER_PAGE, inline=False)
         source.embed.title = f"{plural} Rarity List"
-        source.embed.color = 0xFFFFFF
-
-        if total_pages > 1:
-            source.embed.set_footer(
-                text=f"{len(balls)} {settings.plural_collectible_name} • "
-                     f"Sorted: {sort_label}"
-            )
-        else:
-            source.embed.set_footer(
-                text=f"{len(balls)} {settings.plural_collectible_name}"
-            )
+        source.embed.color = 0XFFFFFF
 
         pages = Pages(source, interaction=interaction)
         await pages.start(ephemeral=ephemeral)
