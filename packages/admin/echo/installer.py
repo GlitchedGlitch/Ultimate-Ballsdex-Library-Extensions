@@ -7,7 +7,7 @@ PKG = "/code/ballsdex/packages/echo"
 CONFIG = "/code/config.yml"
 PACKAGE_ENTRY = "  - ballsdex.packages.echo"
 FILES = ("__init__.py", "cog.py")
-FOOTER = "Ultimate BallsDex Library Extensions • by GlitchedGlitch"
+FOOTER = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
 FOOTER_TIMEOUT = FOOTER + " • Timed out"
 
 
