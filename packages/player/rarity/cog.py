@@ -1,9 +1,13 @@
 """
 Rarity package for BallsDex.
 
-Adds /{players_group} rarity — shows the rarity list of all enabled balls,
-with search (by name or rarity value), reverse sort, ephemeral toggle,
-and BallsDex's built-in FieldPageSource/Pages paginator.
+Adds /{players_group} rarity — shows the rarity list of all enabled balls.
+
+Features:
+  - search: by ball name OR rarity value on the same parameter
+  - reverse: sort highest to lowest
+  - ephemeral: show only to you
+  - BallsDex FieldPageSource/Pages paginator
 """
 
 from __future__ import annotations
@@ -36,11 +40,8 @@ def _ball_emoji(bot: "BallsDexBot", ball: Ball) -> str:
     return "⋄"
 
 
-class RarityCog(commands.Cog):
-    """Rarity package — displays the ball rarity list."""
-
-    def __init__(self, bot: "BallsDexBot"):
-        self.bot = bot
+def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
+    """Build the rarity command as a standalone Command to attach to the Players group."""
 
     @app_commands.command(
         name="rarity",
@@ -48,12 +49,11 @@ class RarityCog(commands.Cog):
     )
     @app_commands.describe(
         search="Search by ball name or rarity value",
-        reverse="Reverse the output of the list",
-        ephemeral="Whether show the list ephemerally",
+        reverse="Sort from highest to lowest rarity (default: lowest first)",
+        ephemeral="Show the result only to you (default: False)",
     )
     async def rarity(
-        self,
-        interaction: discord.Interaction["BallsDexBot"],
+        interaction: discord.Interaction,
         search: str | None = None,
         reverse: bool = False,
         ephemeral: bool = False,
@@ -61,12 +61,12 @@ class RarityCog(commands.Cog):
         name = settings.collectible_name.capitalize()
         plural = settings.plural_collectible_name.capitalize()
 
-        # Fetch all enabled balls
         balls: list[Ball] = [b for b in await Ball.all() if b.enabled]
 
         if not balls:
             await interaction.response.send_message(
-                f"No {plural.lower()} are currently enabled.", ephemeral=True
+                f"No {settings.plural_collectible_name} are currently enabled.",
+                ephemeral=True,
             )
             return
 
@@ -76,86 +76,90 @@ class RarityCog(commands.Cog):
             try:
                 rarity_value = float(search.replace(",", "."))
                 matches = [b for b in balls if float(b.rarity) == rarity_value]
-                if matches:
-                    lines = [
-                        f"⋄ {_ball_emoji(self.bot, b)} {b.country}"
-                        for b in matches
-                    ]
-                    embed = discord.Embed(
-                        title=f"{plural} with rarity `{search}`",
-                        description="\n".join(lines),
-                        color=0x40E0D0,
+
+                if not matches:
+                    await interaction.response.send_message(
+                        f"There are no {settings.collectible_name} "
+                        f"with rarity `{search}`.",
+                        ephemeral=True,
                     )
-                    await interaction.response.send_message(embed=embed, ephemeral=True)
                     return
+
+                lines = [
+                    f"{_ball_emoji(bot, b)} {b.country}"
+                    for b in matches
+                ]
+                await interaction.response.send_message(
+                    f"{plural} with rarity `{search}`:\n" + "\n".join(lines),
+                    ephemeral=True,
+                )
+                return
             except ValueError:
                 pass
 
-            # Try ball name
+            # Try exact ball name, then partial
             match = next(
                 (b for b in balls if b.country.lower() == search.lower()), None
             )
             if not match:
-                # Partial match fallback
                 match = next(
                     (b for b in balls if search.lower() in b.country.lower()), None
                 )
             if not match:
                 await interaction.response.send_message(
-                    f"No {name.lower()} found matching `{search}`.", ephemeral=True
+                    f"No {settings.collectible_name} found matching `{search}`.",
+                    ephemeral=True,
                 )
                 return
 
-            emoji = _ball_emoji(self.bot, match)
-            embed = discord.Embed(
-                title=f"{emoji} {match.country}",
-                description=f"Rarity: `{match.rarity}`",
-                color=0x40E0D0,
+            emoji = _ball_emoji(bot, match)
+            await interaction.response.send_message(
+                f"{emoji} **{match.country}**\nRarity: `{match.rarity}`",
+                ephemeral=True,
             )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
         # ── Full paginated list ───────────────────────────────────────────────
         await interaction.response.defer(ephemeral=ephemeral)
 
-        # Group balls by rarity
         rarity_map: dict[float, list[Ball]] = defaultdict(list)
         for b in balls:
             rarity_map[float(b.rarity)].append(b)
 
         sorted_rarities = sorted(rarity_map.keys(), reverse=reverse)
 
-        # Build (field_name, field_value) entries for FieldPageSource
         entries: list[tuple[str, str]] = []
-        for rarity in sorted_rarities:
-            group_balls = rarity_map[rarity]
+        for r in sorted_rarities:
+            group_balls = rarity_map[r]
             lines = [
-                f"⋄ {_ball_emoji(self.bot, b)} {b.country}"
+                f"⋄ {_ball_emoji(bot, b)} {b.country}"
                 for b in group_balls
             ]
-            entries.append((f"Rarity: {rarity}", "\n".join(lines)))
+            entries.append((f"∥ Rarity: {r}", "\n".join(lines)))
 
         sort_label = "Highest → Lowest" if reverse else "Lowest → Highest"
         total_pages = -(-len(entries) // GROUPS_PER_PAGE)
 
         source = FieldPageSource(entries, per_page=GROUPS_PER_PAGE, inline=False)
         source.embed.title = f"{plural} Rarity List"
-        source.embed.color = 0x40E0D0
+        source.embed.color = 0xFFFFFF
 
         if total_pages > 1:
             source.embed.set_footer(
-                text=f"{len(balls)} {plural.lower()} • Sorted: {sort_label}"
+                text=f"{len(balls)} {settings.plural_collectible_name} • "
+                     f"Sorted: {sort_label}"
             )
         else:
-            source.embed.set_footer(text=f"{len(balls)} {plural.lower()}")
+            source.embed.set_footer(
+                text=f"{len(balls)} {settings.plural_collectible_name}"
+            )
 
         pages = Pages(source, interaction=interaction)
         await pages.start(ephemeral=ephemeral)
 
     @rarity.autocomplete("search")
     async def rarity_autocomplete(
-        self,
-        interaction: discord.Interaction["BallsDexBot"],
+        interaction: discord.Interaction,
         current: str,
     ) -> list[app_commands.Choice[str]]:
         balls: list[Ball] = await Ball.all()
@@ -168,3 +172,12 @@ class RarityCog(commands.Cog):
             if len(results) >= 25:
                 break
         return results
+
+    return rarity
+
+
+class RarityCog(commands.Cog):
+    """Rarity package — displays the ball rarity list."""
+
+    def __init__(self, bot: "BallsDexBot"):
+        self.bot = bot
