@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("ballsdex.packages.rarity")
 
-GROUPS_PER_PAGE = 5
+GROUPS_PER_PAGE = 7
 
 
 def _ball_emoji(bot: "BallsDexBot", ball: Ball) -> str:
@@ -45,11 +45,11 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
 
     @app_commands.command(
         name="rarity",
-        description="Shows the rarity list",
+        description="Check the rarity list of the bot",
     )
     @app_commands.describe(
-        search="Search by ball name or rarity value",
-        reverse="Reverse the output of the list",
+        search=f"Search a specific {settings.collectible_name}'s rarity",
+        reverse="Reverse the output of the rarity list",
         ephemeral="Whether or not to send the command ephemerally.",
     )
     async def rarity(
