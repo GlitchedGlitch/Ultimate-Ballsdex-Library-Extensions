@@ -204,7 +204,7 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
             if embed:
                 parts.append("[embed]")
             if image:
-                parts.append(f"[image: {image.filename} — {image.url}]")
+                parts.append(f"[image: {image.filename}]")
             if reply_msg:
                 parts.append(
                     f"Reply to: {reply_msg.author.name} — {reply_msg.jump_url}"
