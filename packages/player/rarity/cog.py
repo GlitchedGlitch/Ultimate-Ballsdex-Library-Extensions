@@ -1,5 +1,5 @@
 """
-Rarity package for BallsDex (v2.30 compatible).
+Rarity package for BallsDex.
 
 Adds /{players_group} rarity — shows the rarity list of all enabled balls,
 with search (by name or rarity value), reverse sort, ephemeral toggle,
@@ -48,8 +48,8 @@ class RarityCog(commands.Cog):
     )
     @app_commands.describe(
         search="Search by ball name or rarity value",
-        reverse="Sort from highest to lowest rarity (default: lowest first)",
-        ephemeral="Show the result only to you (default: False)",
+        reverse="Reverse the output of the list",
+        ephemeral="Whether show the list ephemerally",
     )
     async def rarity(
         self,
