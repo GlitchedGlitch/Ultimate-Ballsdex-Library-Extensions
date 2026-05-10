@@ -6,19 +6,17 @@ if TYPE_CHECKING:
 
 
 async def setup(bot: "BallsDexBot"):
+    import asyncio
     import discord
     import logging
     from ballsdex.settings import settings
 
     log = logging.getLogger("ballsdex.packages.rarity")
 
-    # The balls/objects group is a GroupCog — find it by cog name "Players"
-    # and attach rarity to its __cog_app_commands_group__, same as admin subgroups
     players_cog = bot.get_cog("Players")
     if players_cog and players_cog.__cog_app_commands_group__:
         group = players_cog.__cog_app_commands_group__
 
-        # Remove existing rarity command to avoid conflicts on reload
         if group.get_command("rarity") is not None:
             group.remove_command("rarity")
             log.info("Removed existing rarity command before re-adding")
@@ -39,8 +37,13 @@ async def setup(bot: "BallsDexBot"):
 
     await bot.add_cog(RarityCog(bot))
 
+    # Sync global tree + all admin guild trees concurrently
     try:
-        await bot.tree.sync()
+        guild_syncs = [
+            bot.tree.sync(guild=discord.Object(id=gid))
+            for gid in settings.admin_guild_ids
+        ]
+        await asyncio.gather(bot.tree.sync(), *guild_syncs)
         log.info("Command tree synced after rarity setup")
     except Exception:
         log.warning("Failed to sync command tree after rarity setup", exc_info=True)
