@@ -1,4 +1,4 @@
-import base64, io, os, re, requests, traceback, discord
+import asyncio, base64, io, os, re, requests, traceback, discord
 from discord.ui import View, Button, Modal, TextInput
 
 REPO = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
@@ -8,7 +8,7 @@ CONFIG = "/code/config.yml"
 NAME_FILE = os.path.join(PKG, "name.txt")
 PACKAGE_ENTRY = "  - ballsdex.packages.echo"
 FILES = ("__init__.py", "cog.py")
-FOOTER = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
+FOOTER = "Ultimate BallsDex Library Extensions • by GlitchedGlitch"
 FOOTER_TIMEOUT = FOOTER + " • Timed out"
 DEFAULT_NAME = "echo"
 
@@ -39,10 +39,9 @@ def _progress_embed(title: str, steps: list, color: discord.Color) -> discord.Em
     return embed
 
 
-# ── Admin group helpers ───────────────────────────────────────────────────────
+# ── Admin group + sync helpers ────────────────────────────────────────────────
 
 def _remove_echo_command(bot, cmd_name: str):
-    """Remove the echo command from the Admin cog group and sync."""
     admin_cog = bot.get_cog("Admin")
     if admin_cog and admin_cog.__cog_app_commands_group__:
         group = admin_cog.__cog_app_commands_group__
@@ -51,10 +50,14 @@ def _remove_echo_command(bot, cmd_name: str):
 
 
 async def _sync_tree(bot):
+    """Sync global tree and all admin guild trees concurrently for speed."""
     from ballsdex.settings import settings
-    await bot.tree.sync()
-    for guild_id in settings.admin_guild_ids:
-        await bot.tree.sync(guild=discord.Object(id=guild_id))
+    guild_syncs = [
+        bot.tree.sync(guild=discord.Object(id=gid))
+        for gid in settings.admin_guild_ids
+    ]
+    # Run global sync + all guild syncs at the same time
+    await asyncio.gather(bot.tree.sync(), *guild_syncs)
 
 
 # ── File helpers ──────────────────────────────────────────────────────────────
@@ -203,11 +206,8 @@ class CommandNameModal(Modal, title="Set Echo Command Name"):
             self.parent.cmd_name = raw
             save_command_name(raw)
             try:
-                # 1. Remove the OLD command name from the admin group
                 _remove_echo_command(self.parent.bot, old_name)
-                # 2. Reload extension — __init__.py will re-add with new name
                 await self.parent.bot.reload_extension("ballsdex.packages.echo")
-                # 3. Sync tree so Discord reflects the rename
                 await _sync_tree(self.parent.bot)
                 await interaction.response.edit_message(
                     embed=build_main_embed(True, discord.Color.gold(), raw),
@@ -254,23 +254,46 @@ class ConfirmDeleteView(View):
     @discord.ui.button(label="Yes, delete it", style=discord.ButtonStyle.danger, emoji="🗑️")
     async def confirm_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
-        try:
-            # 1. Remove the command from the admin group BEFORE unloading
-            #    so the tree is clean when we sync
-            _remove_echo_command(self.parent.bot, self.parent.cmd_name)
 
-            # 2. Unload the extension
+        DELETE_STEPS = [
+            "Removing command from Discord",
+            "Unloading extension",
+            "Syncing command tree",
+            "Deleting package files",
+            "Removing from config.yml",
+        ]
+        steps = [(s, None) for s in DELETE_STEPS]
+
+        async def update(i: int, success: bool = True):
+            steps[i] = (steps[i][0], success)
+            await self.parent.message.edit(
+                embed=_progress_embed("Deleting Echo Package…", steps, discord.Color.red()),
+                view=None,
+            )
+
+        await self.parent.message.edit(
+            embed=_progress_embed("Deleting Echo Package…", steps, discord.Color.red()),
+            view=None,
+        )
+
+        try:
+            _remove_echo_command(self.parent.bot, self.parent.cmd_name)
+            await update(0)
+
             try:
                 await self.parent.bot.unload_extension("ballsdex.packages.echo")
             except Exception:
                 pass
+            await update(1)
 
-            # 3. Sync tree so Discord removes the command immediately
             await _sync_tree(self.parent.bot)
+            await update(2)
 
-            # 4. Clean up files and config
             delete_files()
+            await update(3)
+
             remove_from_config()
+            await update(4)
 
             self.parent.installed = False
             self.parent.done = True
@@ -294,6 +317,10 @@ class ConfirmDeleteView(View):
             err = traceback.format_exc()
             self.parent.done = True
             self.stop()
+            for i, (label, state) in enumerate(steps):
+                if state is None:
+                    steps[i] = (label, False)
+                    break
             f = discord.File(io.BytesIO(err.encode()), filename="delete_error.txt")
             await self.parent.message.edit(embed=build_error_embed("deleting", err), view=None)
             await interaction.followup.send(file=f)
