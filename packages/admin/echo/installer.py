@@ -126,7 +126,8 @@ def build_main_embed(installed: bool, color: discord.Color, cmd_name: str) -> di
             "• `embed` — wrap message in an embed\n"
             "• `channel` — target channel (works cross-server)\n"
             "• `edit_message` — message link to edit instead of sending\n"
-            "• `reply` — message link to reply to\n\n"
+            "• `reply` — message link to reply to\n"
+            "• `delete_message` — message link to delete the message\n\n"
             f"**Command name:** `/admin {cmd_name}`\n"
             f"**Status:** {'✅ Installed' if installed else '❌ Not installed'}"
         ),
