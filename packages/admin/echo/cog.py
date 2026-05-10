@@ -36,12 +36,6 @@ def _parse_message_link(link: str) -> tuple[int, int] | None:
 
 
 def _parse_channel(bot: "BallsDexBot", value: str) -> discord.TextChannel | None:
-    """
-    Resolve a channel from a string. Accepts:
-      - Raw channel ID:  123456789012345678
-      - Channel mention: <#123456789012345678>
-    Works across servers as long as the bot can see the channel.
-    """
     raw = value.strip().lstrip("<#").rstrip(">")
     try:
         channel_id = int(raw)
@@ -130,13 +124,12 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
 
             try:
                 jump_url = del_msg.jump_url
-                channel_info = f"#{del_msg.channel}"  # type: ignore
-                preview = (del_msg.content or "[no text content]")[:100]
+                preview = (del_msg.content or "[no text content]")[:200]
                 await del_msg.delete()
                 await interaction.followup.send("Message deleted!", ephemeral=True)
                 await log_action(
                     f"{interaction.user.name} deleted a message in "
-                    f"{channel_info} {jump_url} | "
+                    f"#{del_msg.channel} {jump_url} | "  # type: ignore
                     f"Message: {preview!r}",
                     bot,
                 )
@@ -182,6 +175,7 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
                 return
 
             try:
+                prev_content = (edit_msg.content or "[no text content]")[:200]
                 if embed:
                     await edit_msg.edit(
                         content=None,
@@ -191,6 +185,7 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
                     await edit_msg.edit(content=message, embed=None)
 
                 await interaction.followup.send("Message edited!", ephemeral=True)
+
                 parts = [
                     f"{interaction.user.name} edited a message in "
                     f"#{edit_msg.channel} {edit_msg.jump_url}",  # type: ignore
@@ -198,9 +193,9 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
                 ]
                 if embed:
                     parts.append("Embed: True")
-                prev = (edit_msg.content or "[no text content]")[:200]
-                parts.append(f"Previous message: {prev!r}")
+                parts.append(f"Previous message: {prev_content!r}")
                 await log_action(" | ".join(parts), bot)
+
             except discord.Forbidden:
                 await interaction.followup.send(
                     "Missing permissions to edit that message.", ephemeral=True
@@ -235,17 +230,17 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
             await interaction.followup.send("Message sent!", ephemeral=True)
 
             parts = [
-                    f"{interaction.user.name} sent a message in "
-                    f"#{target} {sent_msg.jump_url}",
-                    f"Message: {message!r}" if message else "Message: [image only]",
-                ]
-                if image:
-                    parts.append(f"Image: {image.filename} {image.url}")
-                if embed:
-                    parts.append("Embed: True")
-                if reply_msg:
-                    parts.append(f"Replied to: {reply_msg.jump_url}")
-                await log_action(" | ".join(parts), bot)
+                f"{interaction.user.name} sent a message in "
+                f"#{target} {sent_msg.jump_url}",
+                f"Message: {message!r}" if message else "Message: [image only]",
+            ]
+            if image:
+                parts.append(f"Image: {image.filename} {image.url}")
+            if embed:
+                parts.append("Embed: True")
+            if reply_msg:
+                parts.append(f"Replied to: {reply_msg.jump_url}")
+            await log_action(" | ".join(parts), bot)
 
         except discord.Forbidden:
             await interaction.followup.send(
