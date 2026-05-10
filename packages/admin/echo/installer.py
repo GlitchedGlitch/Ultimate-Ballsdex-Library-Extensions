@@ -1,4 +1,4 @@
-import base64, io, os, requests, traceback, discord
+import base64, io, os, re, requests, traceback, discord
 from discord.ui import View, Button, Modal, TextInput
 
 REPO = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
@@ -12,8 +12,40 @@ FOOTER = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
 FOOTER_TIMEOUT = FOOTER + " • Timed out"
 DEFAULT_NAME = "echo"
 
+BAR_FILLED = "█"
+BAR_EMPTY  = "░"
+BAR_LEN    = 10
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _bar(current: int, total: int) -> str:
+    filled = round(BAR_LEN * current / total)
+    pct = round(100 * current / total)
+    return f"`{BAR_FILLED * filled}{BAR_EMPTY * (BAR_LEN - filled)}` {pct}%"
+
+
+def _progress_embed(title: str, steps: list[tuple[str, bool | None]], color: discord.Color) -> discord.Embed:
+    """
+    steps: list of (label, state)
+      state=None  → pending   ⬜
+      state=True  → done      ✅
+      state=False → failed    ❌
+    """
+    done_count = sum(1 for _, s in steps if s is True)
+    total = len(steps)
+    lines = []
+    for label, state in steps:
+        icon = {None: "⬜", True: "✅", False: "❌"}[state]
+        lines.append(f"{icon} {label}")
+    embed = discord.Embed(
+        title=title,
+        description="\n".join(lines) + f"\n\n{_bar(done_count, total)}",
+        color=color,
+    )
+    embed.set_footer(text=FOOTER)
+    return embed
+
+
+# ── File helpers ──────────────────────────────────────────────────────────────
 
 def is_installed():
     return os.path.isdir(PKG) and os.path.isfile(os.path.join(PKG, "cog.py"))
@@ -90,23 +122,6 @@ def build_main_embed(installed: bool, color: discord.Color, cmd_name: str) -> di
     return embed
 
 
-def build_name_embed(cmd_name: str) -> discord.Embed:
-    embed = discord.Embed(
-        title="Set Command Name",
-        description=(
-            "Choose a name for the command.\n\n"
-            f"Current name: `/admin {cmd_name}`\n\n"
-            "The group will always be `/admin`. "
-            "Only lowercase letters, numbers and hyphens are allowed.\n\n"
-            "Type the new name in the box below and confirm, "
-            "or press **Cancel** to go back."
-        ),
-        color=discord.Color.blurple(),
-    )
-    embed.set_footer(text=FOOTER)
-    return embed
-
-
 def build_confirm_embed() -> discord.Embed:
     embed = discord.Embed(
         title="🗑️ Delete Echo Package",
@@ -163,8 +178,6 @@ class CommandNameModal(Modal, title="Set Echo Command Name"):
 
     async def on_submit(self, interaction: discord.Interaction):
         raw = self.name_input.value.strip().lower().replace(" ", "-")
-        # Validate: only lowercase letters, digits, hyphens
-        import re
         if not re.match(r"^[a-z0-9\-]{1,32}$", raw):
             await interaction.response.send_message(
                 "Invalid name. Use only lowercase letters, numbers and hyphens.",
@@ -174,7 +187,6 @@ class CommandNameModal(Modal, title="Set Echo Command Name"):
 
         self.parent.cmd_name = raw
 
-        # If already installed, save and reload immediately
         if self.parent.installed:
             save_command_name(raw)
             try:
@@ -193,7 +205,6 @@ class CommandNameModal(Modal, title="Set Echo Command Name"):
                     ephemeral=True,
                 )
         else:
-            # Just update the embed preview before installing
             await interaction.response.edit_message(
                 embed=build_main_embed(False, discord.Color.greyple(), raw),
                 view=self.parent,
@@ -285,7 +296,6 @@ class EchoInstallerView(View):
                 c.disabled = self.installed
             elif c.label in ("Update", "Delete"):
                 c.disabled = not self.installed
-            # Rename is always enabled when installed or not
 
     async def on_timeout(self):
         if self.done:
@@ -306,12 +316,52 @@ class EchoInstallerView(View):
     @discord.ui.button(label="Install", style=discord.ButtonStyle.success, emoji="📥")
     async def install_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
+
+        INSTALL_STEPS = [
+            "Creating package folder",
+            "Downloading files",
+            "Saving command name",
+            "Adding to config.yml",
+            "Loading extension",
+            "Syncing command tree",
+        ]
+
+        steps = [(s, None) for s in INSTALL_STEPS]
+
+        async def update(i: int, success: bool = True):
+            steps[i] = (steps[i][0], success)
+            await self.message.edit(
+                embed=_progress_embed("Installing Echo Package…", steps, discord.Color.blurple()),
+                view=None,
+            )
+
+        await self.message.edit(
+            embed=_progress_embed("Installing Echo Package…", steps, discord.Color.blurple()),
+            view=None,
+        )
+
         try:
             os.makedirs(PKG, exist_ok=True)
+            await update(0)
+
             download_files()
+            await update(1)
+
             save_command_name(self.cmd_name)
+            await update(2)
+
             add_to_config()
+            await update(3)
+
             await self.bot.load_extension("ballsdex.packages.echo")
+            await update(4)
+
+            from ballsdex.settings import settings
+            await self.bot.tree.sync()
+            for guild_id in settings.admin_guild_ids:
+                await self.bot.tree.sync(guild=discord.Object(id=guild_id))
+            await update(5)
+
             self.done = True
             self.stop()
             await self.message.edit(
@@ -329,6 +379,11 @@ class EchoInstallerView(View):
             err = traceback.format_exc()
             self.done = True
             self.stop()
+            # Mark the failed step
+            for i, (label, state) in enumerate(steps):
+                if state is None:
+                    steps[i] = (label, False)
+                    break
             f = discord.File(io.BytesIO(err.encode()), filename="install_error.txt")
             await self.message.edit(embed=build_error_embed("installing", err), view=None)
             await interaction.followup.send(file=f)
@@ -336,13 +391,44 @@ class EchoInstallerView(View):
     @discord.ui.button(label="Update", style=discord.ButtonStyle.primary, emoji="🔄")
     async def update_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
+
+        UPDATE_STEPS = [
+            "Downloading latest files",
+            "Reloading extension",
+            "Syncing command tree",
+        ]
+
+        steps = [(s, None) for s in UPDATE_STEPS]
+
+        async def update(i: int, success: bool = True):
+            steps[i] = (steps[i][0], success)
+            await self.message.edit(
+                embed=_progress_embed("Updating Echo Package…", steps, discord.Color.blurple()),
+                view=None,
+            )
+
+        await self.message.edit(
+            embed=_progress_embed("Updating Echo Package…", steps, discord.Color.blurple()),
+            view=None,
+        )
+
         try:
             download_files()
+            await update(0)
+
             loaded = "ballsdex.packages.echo" in self.bot.extensions
             if loaded:
                 await self.bot.reload_extension("ballsdex.packages.echo")
             else:
                 await self.bot.load_extension("ballsdex.packages.echo")
+            await update(1)
+
+            from ballsdex.settings import settings
+            await self.bot.tree.sync()
+            for guild_id in settings.admin_guild_ids:
+                await self.bot.tree.sync(guild=discord.Object(id=guild_id))
+            await update(2)
+
             self.done = True
             self.stop()
             await self.message.edit(
@@ -360,13 +446,16 @@ class EchoInstallerView(View):
             err = traceback.format_exc()
             self.done = True
             self.stop()
+            for i, (label, state) in enumerate(steps):
+                if state is None:
+                    steps[i] = (label, False)
+                    break
             f = discord.File(io.BytesIO(err.encode()), filename="update_error.txt")
             await self.message.edit(embed=build_error_embed("updating", err), view=None)
             await interaction.followup.send(file=f)
 
     @discord.ui.button(label="Rename", style=discord.ButtonStyle.secondary, emoji="✏️")
     async def rename_button(self, interaction: discord.Interaction, button: Button):
-        # Open a modal — no defer needed, modal is the response
         await interaction.response.send_modal(CommandNameModal(self))
 
     @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger, emoji="🗑️")
