@@ -13,9 +13,9 @@ async def setup(bot: "BallsDexBot"):
 
     log = logging.getLogger("ballsdex.packages.rarity")
 
-    players_cog = bot.get_cog("Players")
-    if players_cog and players_cog.__cog_app_commands_group__:
-        group = players_cog.__cog_app_commands_group__
+    balls_cog = bot.get_cog("Balls")
+    if balls_cog and balls_cog.__cog_app_commands_group__:
+        group = balls_cog.__cog_app_commands_group__
 
         if group.get_command("rarity") is not None:
             group.remove_command("rarity")
@@ -29,15 +29,14 @@ async def setup(bot: "BallsDexBot"):
         )
     else:
         log.warning(
-            "Could not find Players cog or its command group. "
+            "Could not find Balls cog or its command group. "
             "rarity command will NOT be registered. "
-            "Ensure ballsdex.packages.players is loaded before "
+            "Ensure ballsdex.packages.balls is loaded before "
             "ballsdex.packages.rarity in config.yml."
         )
 
     await bot.add_cog(RarityCog(bot))
 
-    # Sync global tree + all admin guild trees concurrently
     try:
         guild_syncs = [
             bot.tree.sync(guild=discord.Object(id=gid))
