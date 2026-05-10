@@ -50,13 +50,12 @@ def _remove_echo_command(bot, cmd_name: str):
 
 
 async def _sync_tree(bot):
-    """Sync global tree and all admin guild trees concurrently for speed."""
+    """Sync global tree and all admin guild trees concurrently."""
     from ballsdex.settings import settings
     guild_syncs = [
         bot.tree.sync(guild=discord.Object(id=gid))
         for gid in settings.admin_guild_ids
     ]
-    # Run global sync + all guild syncs at the same time
     await asyncio.gather(bot.tree.sync(), *guild_syncs)
 
 
@@ -201,33 +200,97 @@ class CommandNameModal(Modal, title="Set Echo Command Name"):
             )
             return
 
-        if self.parent.installed:
-            old_name = self.parent.cmd_name
+        # Acknowledge the modal immediately so Discord doesn't time out
+        await interaction.response.defer()
+
+        if not self.parent.installed:
+            # Not installed yet — just update the preview
             self.parent.cmd_name = raw
-            save_command_name(raw)
-            try:
-                _remove_echo_command(self.parent.bot, old_name)
-                await self.parent.bot.reload_extension("ballsdex.packages.echo")
-                await _sync_tree(self.parent.bot)
-                await interaction.response.edit_message(
-                    embed=build_main_embed(True, discord.Color.gold(), raw),
-                    view=self.parent,
-                )
-                await interaction.followup.send(
-                    f"Command renamed from `/admin {old_name}` to `/admin {raw}` and synced!",
-                    ephemeral=True,
-                )
-            except Exception as e:
-                await interaction.response.send_message(
-                    f"Saved name but failed to reload:\n```py\n{e}\n```",
-                    ephemeral=True,
-                )
-        else:
-            self.parent.cmd_name = raw
-            await interaction.response.edit_message(
+            await self.parent.message.edit(
                 embed=build_main_embed(False, discord.Color.greyple(), raw),
                 view=self.parent,
             )
+            return
+
+        # ── Installed: show rename progress ───────────────────────────────────
+        old_name = self.parent.cmd_name
+        RENAME_STEPS = [
+            f"Removing /admin {old_name}",
+            "Unloading extension",
+            "Saving new command name",
+            "Reloading extension",
+            "Syncing command tree",
+        ]
+        steps = [(s, None) for s in RENAME_STEPS]
+
+        async def update(i: int, success: bool = True):
+            steps[i] = (steps[i][0], success)
+            await self.parent.message.edit(
+                embed=_progress_embed(
+                    f"Renaming to /admin {raw}…", steps, discord.Color.blurple()
+                ),
+                view=None,
+            )
+
+        await self.parent.message.edit(
+            embed=_progress_embed(
+                f"Renaming to /admin {raw}…", steps, discord.Color.blurple()
+            ),
+            view=None,
+        )
+
+        try:
+            # 1. Remove old command from admin group
+            _remove_echo_command(self.parent.bot, old_name)
+            await update(0)
+
+            # 2. Unload — so load_extension works cleanly below
+            try:
+                await self.parent.bot.unload_extension("ballsdex.packages.echo")
+            except Exception:
+                pass
+            await update(1)
+
+            # 3. Save new name so __init__.py picks it up on next load
+            save_command_name(raw)
+            self.parent.cmd_name = raw
+            await update(2)
+
+            # 4. Load fresh — avoids the "already loaded" error
+            await self.parent.bot.load_extension("ballsdex.packages.echo")
+            await update(3)
+
+            # 5. Sync
+            await _sync_tree(self.parent.bot)
+            await update(4)
+
+            await self.parent.message.edit(
+                embed=build_result_embed(
+                    "Successfully Renamed",
+                    (
+                        f"Command renamed from `/admin {old_name}` to `/admin {raw}`.\n\n"
+                        "Run this installer again to update, rename or remove the package."
+                    ),
+                    discord.Color.blurple(),
+                ),
+                view=None,
+            )
+            self.parent.done = True
+            self.parent.stop()
+
+        except Exception:
+            err = traceback.format_exc()
+            for i, (label, state) in enumerate(steps):
+                if state is None:
+                    steps[i] = (label, False)
+                    break
+            f = discord.File(io.BytesIO(err.encode()), filename="rename_error.txt")
+            await self.parent.message.edit(
+                embed=build_error_embed("renaming", err), view=None
+            )
+            await interaction.followup.send(file=f)
+            self.parent.done = True
+            self.parent.stop()
 
 
 # ── Confirm delete ────────────────────────────────────────────────────────────
@@ -300,7 +363,7 @@ class ConfirmDeleteView(View):
             self.stop()
             await self.parent.message.edit(
                 embed=build_result_embed(
-                    "Successfully Deleted",
+                    "🗑️ Successfully Deleted",
                     (
                         "The **Echo Package** has been removed.\n\n"
                         "• `/admin echo` removed from Discord\n"
