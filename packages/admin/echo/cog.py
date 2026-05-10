@@ -4,8 +4,9 @@ Echo package for BallsDex.
 Commands:
   /admin <name> — send, edit or reply to messages as the bot (admin only)
 
-The command name is configurable via the installer and stored in name.txt.
-Logs every successful action to the configured log channel.
+Channel parameter accepts a channel ID or mention string so cross-server
+channels work. Discord's native TextChannel type only resolves within the
+current guild, so we handle resolution manually via bot.get_channel().
 """
 
 from __future__ import annotations
@@ -32,6 +33,25 @@ def _parse_message_link(link: str) -> tuple[int, int] | None:
         return int(parts[-2]), int(parts[-1])
     except (ValueError, IndexError):
         return None
+
+
+def _parse_channel(bot: "BallsDexBot", value: str) -> discord.TextChannel | None:
+    """
+    Resolve a channel from a string. Accepts:
+      - Raw channel ID:  123456789012345678
+      - Channel mention: <#123456789012345678>
+    Works across servers as long as the bot can see the channel.
+    """
+    # Strip mention formatting if present
+    raw = value.strip().lstrip("<#").rstrip(">")
+    try:
+        channel_id = int(raw)
+    except ValueError:
+        return None
+    channel = bot.get_channel(channel_id)
+    if isinstance(channel, discord.TextChannel):
+        return channel
+    return None
 
 
 async def _fetch_message(
@@ -71,7 +91,7 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
         message="The text content to send or use when editing",
         image="An image to attach (only used when sending, not editing)",
         embed="Wrap the message text in an embed",
-        channel="Channel to send to — works across servers (defaults to current channel)",
+        channel="Channel ID or <#mention> to send to — works cross-server (default: current channel)",
         edit_message="Message link to edit instead of sending a new message",
         reply="Message link to reply to when sending",
     )
@@ -80,7 +100,7 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
         message: str | None = None,
         image: discord.Attachment | None = None,
         embed: bool = False,
-        channel: discord.TextChannel | None = None,
+        channel: str | None = None,
         edit_message: str | None = None,
         reply: str | None = None,
     ):
@@ -92,6 +112,19 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
             return
 
         await interaction.response.defer(ephemeral=True)
+
+        # ── Resolve channel ───────────────────────────────────────────────────
+        if channel is not None:
+            target = _parse_channel(bot, channel)
+            if target is None:
+                await interaction.followup.send(
+                    "Could not find that channel. Make sure you're using a valid channel ID "
+                    "or `<#mention>` and that the bot has access to it.",
+                    ephemeral=True,
+                )
+                return
+        else:
+            target: discord.TextChannel = interaction.channel  # type: ignore
 
         # ── Edit mode ─────────────────────────────────────────────────────────
         if edit_message:
@@ -140,8 +173,6 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
             return
 
         # ── Send mode ─────────────────────────────────────────────────────────
-        target: discord.TextChannel = channel or interaction.channel  # type: ignore
-
         reply_msg: discord.Message | None = None
         if reply:
             reply_msg, err = await _fetch_message(bot, reply)
@@ -187,6 +218,5 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
         except Exception as e:
             await interaction.followup.send(f"Error:\n```py\n{e}\n```", ephemeral=True)
 
-    # Mark so __init__.py can find and remove it by tag on reload
     echo._is_echo = True  # type: ignore
     return echo
