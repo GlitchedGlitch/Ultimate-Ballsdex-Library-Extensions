@@ -49,7 +49,7 @@ def delete_files():
 
 def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
     embed = discord.Embed(
-        title="📢 Echo Package",
+        title="Echo Package",
         description=(
             "Adds an admin echo command to your BallsDex instance.\n\n"
             "**Commands**\n"
@@ -71,7 +71,7 @@ def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
 
 def build_confirm_embed() -> discord.Embed:
     embed = discord.Embed(
-        title="🗑️ Delete Echo Package",
+        title="Delete Echo Package",
         description=(
             "⚠️ **Are you sure you want to delete the Echo package?**\n\n"
             "This will:\n"
@@ -89,7 +89,7 @@ def build_confirm_embed() -> discord.Embed:
 def build_error_embed(action: str, error: str) -> discord.Embed:
     short = error[:1000] + "..." if len(error) > 1000 else error
     embed = discord.Embed(
-        title="❌ An error occurred",
+        title="An error occurred",
         description=(
             f"An error occurred when **{action}** the package!\n\n"
             f"```\n{short}\n```\n\n"
@@ -141,7 +141,7 @@ class ConfirmDeleteView(View):
             self.stop()
             await self.parent.message.edit(
                 embed=build_result_embed(
-                    "🗑️ Successfully Deleted",
+                    "Successfully Deleted",
                     (
                         "The **Echo Package** has been removed.\n\n"
                         "• All package files deleted\n"
@@ -216,7 +216,7 @@ class EchoInstallerView(View):
             self.stop()
             await self.message.edit(
                 embed=build_result_embed(
-                    "✅ Successfully Installed",
+                    "Successfully Installed",
                     (
                         "The **Echo Package** has been installed and loaded.\n\n"
                         "You can now use `/admin echo`.\n\n"
@@ -248,7 +248,7 @@ class EchoInstallerView(View):
             self.stop()
             await self.message.edit(
                 embed=build_result_embed(
-                    "🔄 Successfully Updated",
+                    "Successfully Updated",
                     (
                         "The **Echo Package** has been updated and reloaded.\n\n"
                         "All commands are now running the latest version.\n\n"
