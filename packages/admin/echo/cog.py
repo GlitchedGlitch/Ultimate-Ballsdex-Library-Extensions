@@ -1,16 +1,11 @@
 """
-Echo package for BallsDex (v2.30 compatible).
+Echo package for BallsDex.
 
 Commands:
   /admin echo — send, edit or reply to messages as the bot (admin only)
 
-All features in one command:
-  - message: text to send
-  - image: file attachment to send
-  - embed: wrap message in an embed
-  - channel: target channel (works cross-guild)
-  - edit_message: message link to edit instead of sending
-  - reply: message link to reply to
+Logs every successful action to the configured log channel showing:
+  user, message content, target channel, whether it was an edit, reply target
 """
 
 from __future__ import annotations
@@ -22,6 +17,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from ballsdex.core.utils.logging import log_action
 from ballsdex.settings import settings
 
 if TYPE_CHECKING:
@@ -31,11 +27,6 @@ log = logging.getLogger("ballsdex.packages.echo")
 
 
 def _parse_message_link(link: str) -> tuple[int, int] | None:
-    """
-    Parse a Discord message link into (channel_id, message_id).
-    Accepts https://discord.com/channels/GUILD/CHANNEL/MESSAGE
-    Returns None if malformed.
-    """
     try:
         parts = link.strip().rstrip("/").split("/")
         return int(parts[-2]), int(parts[-1])
@@ -46,15 +37,9 @@ def _parse_message_link(link: str) -> tuple[int, int] | None:
 async def _fetch_message(
     bot: "BallsDexBot", link: str
 ) -> tuple[discord.Message | None, str | None]:
-    """
-    Fetch a message from a link. Returns (message, error_string).
-    error_string is None on success.
-    """
     parsed = _parse_message_link(link)
     if not parsed:
-        return None, (
-            "Invalid message link. Copy it via **Copy Message Link** in Discord."
-        )
+        return None, "Invalid message link. Copy it via **Copy Message Link** in Discord."
     channel_id, message_id = parsed
     channel = bot.get_channel(channel_id)
     if not isinstance(channel, discord.TextChannel):
@@ -67,10 +52,6 @@ async def _fetch_message(
         return msg, None
     except discord.NotFound:
         return None, "Could not find the message. Make sure the link is correct."
-
-
-class EchoAdminCommand(app_commands.Command):
-    pass
 
 
 class EchoCog(commands.Cog):
@@ -100,7 +81,6 @@ def EchoAdminCommand(bot: "BallsDexBot") -> app_commands.Command:
         edit_message: str | None = None,
         reply: str | None = None,
     ):
-        # Must have something to send/edit with
         if not message and not image and not edit_message:
             await interaction.response.send_message(
                 "You must provide at least a `message`, an `image`, or an `edit_message` link.",
@@ -138,22 +118,27 @@ def EchoAdminCommand(bot: "BallsDexBot") -> app_commands.Command:
                     )
                 else:
                     await edit_msg.edit(content=message, embed=None)
+
                 await interaction.followup.send("Message edited!", ephemeral=True)
+                await log_action(
+                    f"{interaction.user.name} edited a message in "
+                    f"#{edit_msg.channel} ({edit_msg.channel.id}). "  # type: ignore
+                    f"Link: {edit_msg.jump_url} | "
+                    f"New content: {message!r}"
+                    + (" [embed]" if embed else ""),
+                    bot,
+                )
             except discord.Forbidden:
                 await interaction.followup.send(
                     "Missing permissions to edit that message.", ephemeral=True
                 )
             except Exception as e:
-                await interaction.followup.send(
-                    f"Error:\n```py\n{e}\n```", ephemeral=True
-                )
+                await interaction.followup.send(f"Error:\n```py\n{e}\n```", ephemeral=True)
             return
 
         # ── Send mode ─────────────────────────────────────────────────────────
-        # Resolve target channel — bot.get_channel works cross-guild
         target: discord.TextChannel = channel or interaction.channel  # type: ignore
 
-        # Resolve reply
         reply_msg: discord.Message | None = None
         if reply:
             reply_msg, err = await _fetch_message(bot, reply)
@@ -161,7 +146,6 @@ def EchoAdminCommand(bot: "BallsDexBot") -> app_commands.Command:
                 await interaction.followup.send(err, ephemeral=True)
                 return
 
-        # Build kwargs
         kwargs: dict = {}
         if embed:
             kwargs["embed"] = discord.Embed(description=message or "")
@@ -178,13 +162,27 @@ def EchoAdminCommand(bot: "BallsDexBot") -> app_commands.Command:
         try:
             await target.send(**kwargs)
             await interaction.followup.send("Message sent!", ephemeral=True)
+
+            # Build log line
+            parts = [
+                f"{interaction.user.name} sent a message in #{target} ({target.id}).",
+                f"Content: {message!r}" if message else "Content: [image only]",
+            ]
+            if embed:
+                parts.append("[embed]")
+            if image:
+                parts.append(f"[image: {image.filename}]")
+            if reply_msg:
+                parts.append(
+                    f"Reply to: {reply_msg.author.name} — {reply_msg.jump_url}"
+                )
+            await log_action(" | ".join(parts), bot)
+
         except discord.Forbidden:
             await interaction.followup.send(
                 f"Missing permissions to send in {target.mention}.", ephemeral=True
             )
         except Exception as e:
-            await interaction.followup.send(
-                f"Error:\n```py\n{e}\n```", ephemeral=True
-            )
+            await interaction.followup.send(f"Error:\n```py\n{e}\n```", ephemeral=True)
 
     return echo
