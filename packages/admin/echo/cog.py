@@ -88,7 +88,7 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
     @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
     @app_commands.describe(
         message="The text content to send or use when editing",
-        image="An image to attach (only used when sending, not editing)",
+        image="An image to attach",
         embed="Wrap the message text in an embed",
         channel="Channel ID or <#mention> to send to — works cross-server (default: current channel)",
         edit_message="Message link to edit instead of sending a new message",
@@ -130,14 +130,14 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
 
             try:
                 jump_url = del_msg.jump_url
-                channel_info = f"#{del_msg.channel} ({del_msg.channel.id})"  # type: ignore
+                channel_info = f"#{del_msg.channel}"  # type: ignore
                 preview = (del_msg.content or "[no text content]")[:100]
                 await del_msg.delete()
                 await interaction.followup.send("Message deleted!", ephemeral=True)
                 await log_action(
-                    f"{interaction.user.name} deleted a message in {channel_info}. "
-                    f"Link (now dead): {jump_url} | "
-                    f"Content preview: {preview!r}",
+                    f"{interaction.user.name} deleted a message in "
+                    f"{channel_info} {jump_url} | "
+                    f"Message: {preview!r}",
                     bot,
                 )
             except discord.Forbidden:
@@ -191,14 +191,16 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
                     await edit_msg.edit(content=message, embed=None)
 
                 await interaction.followup.send("Message edited!", ephemeral=True)
-                await log_action(
+                parts = [
                     f"{interaction.user.name} edited a message in "
-                    f"#{edit_msg.channel} ({edit_msg.channel.id}). "  # type: ignore
-                    f"Link: {edit_msg.jump_url} | "
-                    f"New content: {message!r}"
-                    + (" [embed]" if embed else ""),
-                    bot,
-                )
+                    f"#{edit_msg.channel} {edit_msg.jump_url}",  # type: ignore
+                    f"Message: {message!r}",
+                ]
+                if embed:
+                    parts.append("Embed: True")
+                prev = (edit_msg.content or "[no text content]")[:200]
+                parts.append(f"Previous message: {prev!r}")
+                await log_action(" | ".join(parts), bot)
             except discord.Forbidden:
                 await interaction.followup.send(
                     "Missing permissions to edit that message.", ephemeral=True
@@ -229,22 +231,21 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
             kwargs["mention_author"] = False
 
         try:
-            await target.send(**kwargs)
+            sent_msg = await target.send(**kwargs)
             await interaction.followup.send("Message sent!", ephemeral=True)
 
             parts = [
-                f"{interaction.user.name} sent a message in #{target} ({target.id}).",
-                f"Content: {message!r}" if message else "Content: [image only]",
-            ]
-            if embed:
-                parts.append("[embed]")
-            if image:
-                parts.append(f"[image: {image.filename} — {image.url}]")
-            if reply_msg:
-                parts.append(
-                    f"Reply to: {reply_msg.author.name} — {reply_msg.jump_url}"
-                )
-            await log_action(" | ".join(parts), bot)
+                    f"{interaction.user.name} sent a message in "
+                    f"#{target} {sent_msg.jump_url}",
+                    f"Message: {message!r}" if message else "Message: [image only]",
+                ]
+                if image:
+                    parts.append(f"Image: {image.filename} {image.url}")
+                if embed:
+                    parts.append("Embed: True")
+                if reply_msg:
+                    parts.append(f"Replied to: {reply_msg.jump_url}")
+                await log_action(" | ".join(parts), bot)
 
         except discord.Forbidden:
             await interaction.followup.send(
