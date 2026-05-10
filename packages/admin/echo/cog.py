@@ -2,7 +2,7 @@
 Echo package for BallsDex.
 
 Commands:
-  /admin <name> — send, edit or reply to messages as the bot (admin only)
+  /admin <name> — send, edit, delete or reply to messages as the bot (admin only)
 
 Channel parameter accepts a channel ID or mention string so cross-server
 channels work. Discord's native TextChannel type only resolves within the
@@ -42,7 +42,6 @@ def _parse_channel(bot: "BallsDexBot", value: str) -> discord.TextChannel | None
       - Channel mention: <#123456789012345678>
     Works across servers as long as the bot can see the channel.
     """
-    # Strip mention formatting if present
     raw = value.strip().lstrip("<#").rstrip(">")
     try:
         channel_id = int(raw)
@@ -84,7 +83,7 @@ class EchoCog(commands.Cog):
 def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Command:
     @app_commands.command(
         name=name,
-        description="Send, edit or reply to messages as the bot",
+        description="Send, edit, delete or reply to messages as the bot",
     )
     @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
     @app_commands.describe(
@@ -94,6 +93,7 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
         channel="Channel ID or <#mention> to send to — works cross-server (default: current channel)",
         edit_message="Message link to edit instead of sending a new message",
         reply="Message link to reply to when sending",
+        delete_message="Message link of the bot message to delete",
     )
     async def echo(
         interaction: discord.Interaction,
@@ -103,15 +103,50 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
         channel: str | None = None,
         edit_message: str | None = None,
         reply: str | None = None,
+        delete_message: str | None = None,
     ):
-        if not message and not image and not edit_message:
+        if not message and not image and not edit_message and not delete_message:
             await interaction.response.send_message(
-                "You must provide at least a `message`, an `image`, or an `edit_message` link.",
+                "You must provide at least a `message`, an `image`, "
+                "an `edit_message` link, or a `delete_message` link.",
                 ephemeral=True,
             )
             return
 
         await interaction.response.defer(ephemeral=True)
+
+        # ── Delete mode ───────────────────────────────────────────────────────
+        if delete_message:
+            del_msg, err = await _fetch_message(bot, delete_message)
+            if err:
+                await interaction.followup.send(err, ephemeral=True)
+                return
+
+            if del_msg.author.id != bot.user.id:  # type: ignore
+                await interaction.followup.send(
+                    "I can only delete my own messages.", ephemeral=True
+                )
+                return
+
+            try:
+                jump_url = del_msg.jump_url
+                channel_info = f"#{del_msg.channel} ({del_msg.channel.id})"  # type: ignore
+                preview = (del_msg.content or "[no text content]")[:100]
+                await del_msg.delete()
+                await interaction.followup.send("Message deleted!", ephemeral=True)
+                await log_action(
+                    f"{interaction.user.name} deleted a message in {channel_info}. "
+                    f"Link (now dead): {jump_url} | "
+                    f"Content preview: {preview!r}",
+                    bot,
+                )
+            except discord.Forbidden:
+                await interaction.followup.send(
+                    "Missing permissions to delete that message.", ephemeral=True
+                )
+            except Exception as e:
+                await interaction.followup.send(f"Error:\n```py\n{e}\n```", ephemeral=True)
+            return
 
         # ── Resolve channel ───────────────────────────────────────────────────
         if channel is not None:
@@ -204,7 +239,7 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
             if embed:
                 parts.append("[embed]")
             if image:
-                parts.append(f"[image: {image.filename}]")
+                parts.append(f"[image: {image.filename} — {image.url}]")
             if reply_msg:
                 parts.append(
                     f"Reply to: {reply_msg.author.name} — {reply_msg.jump_url}"
