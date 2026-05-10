@@ -23,13 +23,7 @@ def _bar(current: int, total: int) -> str:
     return f"`{BAR_FILLED * filled}{BAR_EMPTY * (BAR_LEN - filled)}` {pct}%"
 
 
-def _progress_embed(title: str, steps: list[tuple[str, bool | None]], color: discord.Color) -> discord.Embed:
-    """
-    steps: list of (label, state)
-      state=None  → pending   ⬜
-      state=True  → done      ✅
-      state=False → failed    ❌
-    """
+def _progress_embed(title: str, steps: list, color: discord.Color) -> discord.Embed:
     done_count = sum(1 for _, s in steps if s is True)
     total = len(steps)
     lines = []
@@ -43,6 +37,24 @@ def _progress_embed(title: str, steps: list[tuple[str, bool | None]], color: dis
     )
     embed.set_footer(text=FOOTER)
     return embed
+
+
+# ── Admin group helpers ───────────────────────────────────────────────────────
+
+def _remove_echo_command(bot, cmd_name: str):
+    """Remove the echo command from the Admin cog group and sync."""
+    admin_cog = bot.get_cog("Admin")
+    if admin_cog and admin_cog.__cog_app_commands_group__:
+        group = admin_cog.__cog_app_commands_group__
+        if group.get_command(cmd_name):
+            group.remove_command(cmd_name)
+
+
+async def _sync_tree(bot):
+    from ballsdex.settings import settings
+    await bot.tree.sync()
+    for guild_id in settings.admin_guild_ids:
+        await bot.tree.sync(guild=discord.Object(id=guild_id))
 
 
 # ── File helpers ──────────────────────────────────────────────────────────────
@@ -129,6 +141,7 @@ def build_confirm_embed() -> discord.Embed:
             "⚠️ **Are you sure you want to delete the Echo package?**\n\n"
             "This will:\n"
             "• Unload the package from the bot\n"
+            "• Remove `/admin echo` from Discord\n"
             "• Delete all package files\n"
             "• Remove it from `config.yml`\n\n"
             "This action **cannot be undone** without reinstalling."
@@ -185,18 +198,23 @@ class CommandNameModal(Modal, title="Set Echo Command Name"):
             )
             return
 
-        self.parent.cmd_name = raw
-
         if self.parent.installed:
+            old_name = self.parent.cmd_name
+            self.parent.cmd_name = raw
             save_command_name(raw)
             try:
+                # 1. Remove the OLD command name from the admin group
+                _remove_echo_command(self.parent.bot, old_name)
+                # 2. Reload extension — __init__.py will re-add with new name
                 await self.parent.bot.reload_extension("ballsdex.packages.echo")
+                # 3. Sync tree so Discord reflects the rename
+                await _sync_tree(self.parent.bot)
                 await interaction.response.edit_message(
                     embed=build_main_embed(True, discord.Color.gold(), raw),
                     view=self.parent,
                 )
                 await interaction.followup.send(
-                    f"Command renamed to `/admin {raw}` and reloaded!",
+                    f"Command renamed from `/admin {old_name}` to `/admin {raw}` and synced!",
                     ephemeral=True,
                 )
             except Exception as e:
@@ -205,6 +223,7 @@ class CommandNameModal(Modal, title="Set Echo Command Name"):
                     ephemeral=True,
                 )
         else:
+            self.parent.cmd_name = raw
             await interaction.response.edit_message(
                 embed=build_main_embed(False, discord.Color.greyple(), raw),
                 view=self.parent,
@@ -236,12 +255,23 @@ class ConfirmDeleteView(View):
     async def confirm_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
         try:
-            await self.parent.bot.unload_extension("ballsdex.packages.echo")
-        except Exception:
-            pass
-        try:
+            # 1. Remove the command from the admin group BEFORE unloading
+            #    so the tree is clean when we sync
+            _remove_echo_command(self.parent.bot, self.parent.cmd_name)
+
+            # 2. Unload the extension
+            try:
+                await self.parent.bot.unload_extension("ballsdex.packages.echo")
+            except Exception:
+                pass
+
+            # 3. Sync tree so Discord removes the command immediately
+            await _sync_tree(self.parent.bot)
+
+            # 4. Clean up files and config
             delete_files()
             remove_from_config()
+
             self.parent.installed = False
             self.parent.done = True
             self.stop()
@@ -250,6 +280,7 @@ class ConfirmDeleteView(View):
                     "Successfully Deleted",
                     (
                         "The **Echo Package** has been removed.\n\n"
+                        "• `/admin echo` removed from Discord\n"
                         "• All package files deleted\n"
                         "• Removed from `config.yml`\n\n"
                         "Restart the bot to fully apply the config change.\n\n"
@@ -325,7 +356,6 @@ class EchoInstallerView(View):
             "Loading extension",
             "Syncing command tree",
         ]
-
         steps = [(s, None) for s in INSTALL_STEPS]
 
         async def update(i: int, success: bool = True):
@@ -356,10 +386,7 @@ class EchoInstallerView(View):
             await self.bot.load_extension("ballsdex.packages.echo")
             await update(4)
 
-            from ballsdex.settings import settings
-            await self.bot.tree.sync()
-            for guild_id in settings.admin_guild_ids:
-                await self.bot.tree.sync(guild=discord.Object(id=guild_id))
+            await _sync_tree(self.bot)
             await update(5)
 
             self.done = True
@@ -379,7 +406,6 @@ class EchoInstallerView(View):
             err = traceback.format_exc()
             self.done = True
             self.stop()
-            # Mark the failed step
             for i, (label, state) in enumerate(steps):
                 if state is None:
                     steps[i] = (label, False)
@@ -397,7 +423,6 @@ class EchoInstallerView(View):
             "Reloading extension",
             "Syncing command tree",
         ]
-
         steps = [(s, None) for s in UPDATE_STEPS]
 
         async def update(i: int, success: bool = True):
@@ -423,10 +448,7 @@ class EchoInstallerView(View):
                 await self.bot.load_extension("ballsdex.packages.echo")
             await update(1)
 
-            from ballsdex.settings import settings
-            await self.bot.tree.sync()
-            for guild_id in settings.admin_guild_ids:
-                await self.bot.tree.sync(guild=discord.Object(id=guild_id))
+            await _sync_tree(self.bot)
             await update(2)
 
             self.done = True
