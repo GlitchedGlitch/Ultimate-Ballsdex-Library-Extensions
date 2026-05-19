@@ -112,9 +112,9 @@ def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
             "• `/admin broadcast rm_channel` — remove a channel from the broadcast list\n"
             "• `/admin broadcast channels` — list all configured channels in this server\n\n"
             "**Delivery Options**\n"
-            "• 📡 Spawn Channels Only\n"
-            "• 📬 Player DMs Only\n"
-            "• 🌐 Spawn Channels + DMs\n\n"
+            "• Spawn Channels Only\n"
+            "• Player DMs Only\n"
+            "• Both\n\n"
             "**Composer Features**\n"
             "• Edit message content via modal\n"
             "• Toggle embed on/off\n"
@@ -131,7 +131,7 @@ def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
 
 def build_confirm_embed() -> discord.Embed:
     embed = discord.Embed(
-        title="🗑️ Delete Broadcast Package",
+        title="Delete Broadcast Package",
         description=(
             "⚠️ **Are you sure you want to delete the Broadcast package?**\n\n"
             "This will:\n"
@@ -238,7 +238,7 @@ class ConfirmDeleteView(View):
             self.stop()
             await self.parent.message.edit(
                 embed=build_result_embed(
-                    "🗑️ Successfully Deleted",
+                    "Successfully Deleted",
                     (
                         "The **Broadcast Package** has been removed.\n\n"
                         "• `/admin broadcast` removed from Discord\n"
