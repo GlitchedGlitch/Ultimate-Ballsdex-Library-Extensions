@@ -2,10 +2,8 @@
 Broadcast package for BallsDex.
 
 Commands:
-  /admin broadcast send        — open the broadcast composer (ephemeral)
-  /admin broadcast add_channel — add a spawn channel to the broadcast list
-  /admin broadcast rm_channel  — remove a spawn channel from the broadcast list
-  /admin broadcast channels    — list all configured channels in this server
+  /admin broadcast send    — open the broadcast composer (ephemeral)
+  /admin broadcast preview — preview what the message will look like
 """
 
 from __future__ import annotations
@@ -18,6 +16,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from ballsdex.core.models import GuildConfig, Player
 from ballsdex.core.utils.logging import log_action
 from ballsdex.settings import settings
 
@@ -85,9 +84,9 @@ class ConfirmView(discord.ui.View):
 # ── Broadcast composer ────────────────────────────────────────────────────────
 
 class BroadcastView(discord.ui.View):
-    def __init__(self, cog: "BroadcastCog", invoker: discord.User):
+    def __init__(self, bot: "BallsDexBot", invoker: discord.User):
         super().__init__(timeout=300)
-        self.cog = cog
+        self.bot = bot
         self.invoker = invoker
         self.content: str = ""
         self.use_embed: bool = False
@@ -96,8 +95,6 @@ class BroadcastView(discord.ui.View):
         self.embed_color_label: str = "blue"
         self.delivery: str = "spawn"
         self._rebuild()
-
-    # ── helpers ───────────────────────────────────────────────────────────────
 
     def _rebuild(self):
         self.clear_items()
@@ -153,7 +150,8 @@ class BroadcastView(discord.ui.View):
             placeholder=f"Delivery: {DELIVERY_LABELS[self.delivery]}",
             options=[
                 discord.SelectOption(
-                    label=v, value=k,
+                    label=v,
+                    value=k,
                     emoji={"spawn": "📡", "dms": "📬", "both": "🌐"}[k],
                     default=(k == self.delivery),
                 )
@@ -164,7 +162,7 @@ class BroadcastView(discord.ui.View):
         sel.callback = self._set_delivery
         self.add_item(sel)
 
-        # Embed options — row 2 (only when embed is on)
+        # Embed-only options — row 2
         if self.use_embed:
             title_btn = discord.ui.Button(
                 label=f"Title: {self.embed_title[:20]}{'…' if len(self.embed_title) > 20 else ''}",
@@ -187,7 +185,8 @@ class BroadcastView(discord.ui.View):
     def _status_embed(self) -> discord.Embed:
         snippet = (
             f"```\n{self.content[:300]}{'…' if len(self.content) > 300 else ''}\n```"
-            if self.content else "*No message set yet.*"
+            if self.content
+            else "*No message set yet.*"
         )
         desc = (
             f"**Delivery:** {DELIVERY_LABELS[self.delivery]}\n"
@@ -197,12 +196,11 @@ class BroadcastView(discord.ui.View):
             desc += f"**Title:** {self.embed_title}\n**Color:** {self.embed_color_label}\n"
         desc += f"\n**Message preview:**\n{snippet}"
 
-        embed = discord.Embed(
-            title="Broadcast Composer",
+        return discord.Embed(
+            title="📡 Broadcast Composer",
             description=desc,
             color=self.embed_color if self.use_embed else discord.Color.blurple(),
         )
-        return embed
 
     def _build_send_payload(self) -> dict:
         if self.use_embed:
@@ -336,24 +334,32 @@ class BroadcastView(discord.ui.View):
 
         sent_ch = failed_ch = sent_dm = failed_dm = 0
 
+        # ── Spawn channels: all GuildConfigs with a spawn_channel set ─────────
         if self.delivery in ("spawn", "both"):
-            for ch_id in self.cog.get_all_spawn_channels():
-                ch = self.cog.bot.get_channel(ch_id)
-                if not isinstance(ch, discord.TextChannel):
+            configs = await GuildConfig.filter(
+                spawn_channel__isnull=False, enabled=True
+            ).values_list("spawn_channel", flat=True)
+
+            for channel_id in configs:
+                channel = self.bot.get_channel(channel_id)
+                if not isinstance(channel, discord.TextChannel):
                     failed_ch += 1
                     continue
                 try:
-                    await ch.send(**payload)
+                    await channel.send(**payload)
                     sent_ch += 1
                 except Exception:
                     failed_ch += 1
 
+        # ── Player DMs: every Player row in the database ──────────────────────
         if self.delivery in ("dms", "both"):
-            for user_id in self.cog.player_ids:
-                user = self.cog.bot.get_user(user_id)
+            player_ids = await Player.all().values_list("discord_id", flat=True)
+
+            for discord_id in player_ids:
+                user = self.bot.get_user(discord_id)
                 if user is None:
                     try:
-                        user = await self.cog.bot.fetch_user(user_id)
+                        user = await self.bot.fetch_user(discord_id)
                     except Exception:
                         failed_dm += 1
                         continue
@@ -365,18 +371,17 @@ class BroadcastView(discord.ui.View):
 
         lines = ["**Broadcast complete!**"]
         if self.delivery in ("spawn", "both"):
-            lines.append(f"📡 Channels — ✅ {sent_ch} sent  ❌ {failed_ch} failed")
+            lines.append(f"Channels — {sent_ch} sent  ❌ {failed_ch} failed")
         if self.delivery in ("dms", "both"):
-            lines.append(f"📬 DMs      — ✅ {sent_dm} sent  ❌ {failed_dm} failed")
+            lines.append(f"DMs      — {sent_dm} sent  ❌ {failed_dm} failed")
 
-        result = "\n".join(lines)
-        await interaction.followup.send(result, ephemeral=True)
+        await interaction.followup.send("\n".join(lines), ephemeral=True)
         await log_action(
             f"{interaction.user.name} sent a broadcast | "
             f"Delivery: {self.delivery} | "
             f"Embed: {self.use_embed} | "
             f"Message: {self.content[:200]!r}",
-            self.cog.bot,
+            self.bot,
         )
 
 
@@ -387,74 +392,23 @@ class BroadcastCog(commands.Cog):
 
     def __init__(self, bot: "BallsDexBot"):
         self.bot = bot
-        self.spawn_channels: dict[int, list[int]] = {}  # guild_id -> [channel_ids]
-        self.player_ids: list[int] = []                 # populate from your player DB
-
-    def get_all_spawn_channels(self) -> list[int]:
-        out: list[int] = []
-        for ids in self.spawn_channels.values():
-            out.extend(ids)
-        return out
 
 
 # ── Slash command group ───────────────────────────────────────────────────────
 
 def BroadcastAdminCommand(bot: "BallsDexBot") -> app_commands.Group:
-    group = app_commands.Group(name="broadcast", description="Broadcast messages to channels or players")
+    group = app_commands.Group(
+        name="broadcast",
+        description="Broadcast messages to all spawn channels or all players",
+    )
     group._is_broadcast = True  # type: ignore
 
     @group.command(name="send", description="Open the broadcast composer")
     @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
     async def broadcast_send(interaction: discord.Interaction):
-        cog: BroadcastCog = bot.get_cog("BroadcastCog")  # type: ignore
-        view = BroadcastView(cog, interaction.user)
+        view = BroadcastView(bot, interaction.user)
         await interaction.response.send_message(
             embed=view._status_embed(), view=view, ephemeral=True
         )
-
-    @group.command(name="add_channel", description="Add a channel to the spawn broadcast list")
-    @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
-    @app_commands.describe(channel="Channel to add")
-    async def broadcast_add(interaction: discord.Interaction, channel: discord.TextChannel):
-        cog: BroadcastCog = bot.get_cog("BroadcastCog")  # type: ignore
-        cog.spawn_channels.setdefault(interaction.guild_id, [])
-        if channel.id not in cog.spawn_channels[interaction.guild_id]:
-            cog.spawn_channels[interaction.guild_id].append(channel.id)
-        await interaction.response.send_message(
-            f"Added {channel.mention} to the broadcast list.", ephemeral=True
-        )
-
-    @group.command(name="rm_channel", description="Remove a channel from the spawn broadcast list")
-    @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
-    @app_commands.describe(channel="Channel to remove")
-    async def broadcast_remove(interaction: discord.Interaction, channel: discord.TextChannel):
-        cog: BroadcastCog = bot.get_cog("BroadcastCog")  # type: ignore
-        lst = cog.spawn_channels.get(interaction.guild_id, [])
-        if channel.id in lst:
-            lst.remove(channel.id)
-            await interaction.response.send_message(
-                f"Removed {channel.mention} from the broadcast list.", ephemeral=True
-            )
-        else:
-            await interaction.response.send_message(
-                f"{channel.mention} is not in the broadcast list.", ephemeral=True
-            )
-
-    @group.command(name="channels", description="List configured broadcast channels in this server")
-    @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
-    async def broadcast_list(interaction: discord.Interaction):
-        cog: BroadcastCog = bot.get_cog("BroadcastCog")  # type: ignore
-        ids = cog.spawn_channels.get(interaction.guild_id, [])
-        if not ids:
-            await interaction.response.send_message(
-                "No broadcast channels configured in this server.", ephemeral=True
-            )
-            return
-        embed = discord.Embed(
-            title="Broadcast Channels",
-            description="\n".join(f"<#{i}>" for i in ids),
-            color=discord.Color.blurple(),
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     return group
