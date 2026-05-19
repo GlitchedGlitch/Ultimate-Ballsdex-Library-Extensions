@@ -142,7 +142,7 @@ def build_main_embed(installed: bool, color: discord.Color, cmd_name: str) -> di
 
 def build_confirm_embed() -> discord.Embed:
     embed = discord.Embed(
-        title="🗑️ Delete Echo Package",
+        title="Delete Echo Package",
         description=(
             "⚠️ **Are you sure you want to delete the Echo package?**\n\n"
             "This will:\n"
@@ -367,7 +367,7 @@ class ConfirmDeleteView(View):
             self.stop()
             await self.parent.message.edit(
                 embed=build_result_embed(
-                    "🗑️ Successfully Deleted",
+                    "Successfully Deleted",
                     (
                         "The **Echo Package** has been removed.\n\n"
                         "• `/admin echo` removed from Discord\n"
