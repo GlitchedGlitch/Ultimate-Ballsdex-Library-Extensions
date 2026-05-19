@@ -198,7 +198,7 @@ class BroadcastView(discord.ui.View):
         desc += f"\n**Message preview:**\n{snippet}"
 
         embed = discord.Embed(
-            title="📡 Broadcast Composer",
+            title="Broadcast Composer",
             description=desc,
             color=self.embed_color if self.use_embed else discord.Color.blurple(),
         )
@@ -285,7 +285,7 @@ class BroadcastView(discord.ui.View):
             c = _parse_color(inp.value)
             if c is None:
                 await mi.response.send_message(
-                    "❌ Invalid color. Use a name (red, blue, purple…) or hex (#FF0000).",
+                    "Invalid color. Use a name (red, blue, purple…) or hex (#FF0000).",
                     ephemeral=True,
                 )
                 return
@@ -301,14 +301,14 @@ class BroadcastView(discord.ui.View):
     async def _clear(self, interaction: discord.Interaction):
         cv = ConfirmView()
         await interaction.response.send_message(
-            "⚠️ Clear the message content?", view=cv, ephemeral=True
+            "Clear the message content?", view=cv, ephemeral=True
         )
         await cv.wait()
         if cv.confirmed:
             self.content = ""
             self._rebuild()
         await interaction.edit_original_response(
-            content="✅ Cleared." if cv.confirmed else "Cancelled.", view=None
+            content="Cleared." if cv.confirmed else "Cancelled.", view=None
         )
         if cv.confirmed:
             await self._refresh(interaction)
@@ -316,7 +316,7 @@ class BroadcastView(discord.ui.View):
     async def _close(self, interaction: discord.Interaction):
         cv = ConfirmView()
         await interaction.response.send_message(
-            "⚠️ Close the broadcast composer?", view=cv, ephemeral=True
+            "Close the broadcast composer?", view=cv, ephemeral=True
         )
         await cv.wait()
         if cv.confirmed:
@@ -328,7 +328,7 @@ class BroadcastView(discord.ui.View):
 
     async def _send(self, interaction: discord.Interaction):
         if not self.content:
-            await interaction.response.send_message("❌ No message content set.", ephemeral=True)
+            await interaction.response.send_message("No message content set.", ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)
@@ -363,7 +363,7 @@ class BroadcastView(discord.ui.View):
                 except Exception:
                     failed_dm += 1
 
-        lines = ["✅ **Broadcast complete!**"]
+        lines = ["**Broadcast complete!**"]
         if self.delivery in ("spawn", "both"):
             lines.append(f"📡 Channels — ✅ {sent_ch} sent  ❌ {failed_ch} failed")
         if self.delivery in ("dms", "both"):
@@ -421,7 +421,7 @@ def BroadcastAdminCommand(bot: "BallsDexBot") -> app_commands.Group:
         if channel.id not in cog.spawn_channels[interaction.guild_id]:
             cog.spawn_channels[interaction.guild_id].append(channel.id)
         await interaction.response.send_message(
-            f"✅ Added {channel.mention} to the broadcast list.", ephemeral=True
+            f"Added {channel.mention} to the broadcast list.", ephemeral=True
         )
 
     @group.command(name="rm_channel", description="Remove a channel from the spawn broadcast list")
@@ -433,11 +433,11 @@ def BroadcastAdminCommand(bot: "BallsDexBot") -> app_commands.Group:
         if channel.id in lst:
             lst.remove(channel.id)
             await interaction.response.send_message(
-                f"✅ Removed {channel.mention} from the broadcast list.", ephemeral=True
+                f"Removed {channel.mention} from the broadcast list.", ephemeral=True
             )
         else:
             await interaction.response.send_message(
-                f"❌ {channel.mention} is not in the broadcast list.", ephemeral=True
+                f"{channel.mention} is not in the broadcast list.", ephemeral=True
             )
 
     @group.command(name="channels", description="List configured broadcast channels in this server")
