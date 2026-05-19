@@ -90,12 +90,15 @@ def download_files():
 
 def add_to_config():
     with open(CONFIG, "r") as f:
-        config = f.read()
-    if "ballsdex.packages.echo" not in config:
-        config = config.replace("packages:", "packages:\n" + PACKAGE_ENTRY)
-        with open(CONFIG, "w") as f:
-            f.write(config)
-
+        lines = f.readlines()
+    if any(PACKAGE_ENTRY.strip() in l for l in lines):
+        return
+    for i, line in enumerate(lines):
+        if "ballsdex.packages.trade" in line:
+            lines.insert(i + 1, PACKAGE_ENTRY + "\n")
+            break
+    with open(CONFIG, "w") as f:
+        f.writelines(lines)
 
 def remove_from_config():
     with open(CONFIG, "r") as f:
