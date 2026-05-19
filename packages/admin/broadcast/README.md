@@ -1,4 +1,14 @@
-# How to install
+# Broadcast Package
+## What is this?
+This package creates a command to send messages to all configured spawn channels, DMs or both. It's like the echo package but better? Or worse? Idk
+
+## Guidelines
+This package must not be used for the following reasons:
+* Advertising (major partnerships are allowed)
+* Sending questionable stuff (nothing weird please)
+* Spam this command (How to kill your dex speedrun any%)
+
+## How to install
 Run this eval
 
 ```py
