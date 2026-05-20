@@ -97,45 +97,39 @@ class ConfirmView(discord.ui.View):
         self.stop()
 
 
-# ── Image remove select ───────────────────────────────────────────────────────
+# ── Image remove modal ────────────────────────────────────────────────────────
 
-class RemoveImageSelect(discord.ui.Select):
-    def __init__(self, parent: "BroadcastView"):
-        self.parent = parent
-        options = [
-            discord.SelectOption(
-                label=f"Image {i + 1}",
-                description=url.split("?")[0][-60:],
-                value=str(i),
+def _build_remove_image_modal(parent: "BroadcastView") -> discord.ui.Modal:
+    count = len(parent.image_urls)
+    modal = discord.ui.Modal(title="Remove Image")
+    inp = discord.ui.TextInput(
+        label=f"Image number to remove (1–{count})",
+        placeholder=f"Enter a number between 1 and {count}",
+        min_length=1,
+        max_length=1,
+        required=True,
+    )
+    modal.add_item(inp)
+
+    async def on_submit(mi: discord.Interaction):
+        try:
+            idx = int(inp.value) - 1
+        except ValueError:
+            await mi.response.send_message("Please enter a valid number.", ephemeral=True)
+            return
+        if idx < 0 or idx >= len(parent.image_urls):
+            await mi.response.send_message(
+                f"Invalid number. Choose between 1 and {len(parent.image_urls)}.",
+                ephemeral=True,
             )
-            for i, url in enumerate(parent.image_urls)
-        ]
-        super().__init__(
-            placeholder="Select an image to remove…",
-            options=options,
-            min_values=1,
-            max_values=1,
-        )
+            return
+        parent.image_urls.pop(idx)
+        parent._rebuild()
+        await mi.response.defer()
+        await mi.edit_original_response(embed=parent._composer_embed(), view=parent)
 
-    async def callback(self, interaction: discord.Interaction):
-        idx = int(self.values[0])
-        removed = self.parent.image_urls.pop(idx)
-        self.parent._rebuild()
-        await interaction.response.edit_message(
-            content=f"Removed image {idx + 1}.",
-            view=None,
-        )
-        await self.parent._refresh(interaction)
-
-
-class RemoveImageView(discord.ui.View):
-    def __init__(self, parent: "BroadcastView"):
-        super().__init__(timeout=60)
-        self.add_item(RemoveImageSelect(parent))
-
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary, row=1)
-    async def cancel(self, interaction: discord.Interaction, _: discord.ui.Button):
-        await interaction.response.edit_message(content="Cancelled.", view=None)
+    modal.on_submit = on_submit
+    return modal
 
 
 # ── Broadcast composer ────────────────────────────────────────────────────────
@@ -286,7 +280,7 @@ class BroadcastView(discord.ui.View):
         desc += f"\n**Message preview:**\n{snippet}"
 
         return discord.Embed(
-            title="Broadcast Composer",
+            title="📡 Broadcast Composer",
             description=desc,
             color=self.embed_color if self.use_embed else discord.Color.blurple(),
         )
@@ -397,7 +391,7 @@ class BroadcastView(discord.ui.View):
             c = _parse_color(inp.value)
             if c is None:
                 await mi.response.send_message(
-                    "❌ Invalid color. Use a name (red, blue, purple…) or hex (#FF0000).",
+                    "Invalid color. Use a name (red, blue, purple…) or hex (#FF0000).",
                     ephemeral=True,
                 )
                 return
@@ -421,12 +415,13 @@ class BroadcastView(discord.ui.View):
         self._awaiting_image = True
         self._rebuild()
 
-        prompt = await interaction.channel.send(  # type: ignore
-            f"{interaction.user.mention} Please send your image now. "
-            "(It will be deleted immediately after capture. Type `cancel` to abort.)"
-        )
-        await interaction.response.edit_message(
-            embed=self._composer_embed(), view=self
+        # Acknowledge the button interaction first, then send ephemeral prompt via followup
+        await interaction.response.edit_message(embed=self._composer_embed(), view=self)
+        prompt = await interaction.followup.send(
+            "📎 Please send your image now in this channel. "
+            "It will be deleted immediately after capture. Send `cancel` to abort.",
+            ephemeral=True,
+            wait=True,
         )
 
         def check(m: discord.Message) -> bool:
@@ -488,11 +483,7 @@ class BroadcastView(discord.ui.View):
         if not self.image_urls:
             await interaction.response.send_message("No images to remove.", ephemeral=True)
             return
-        await interaction.response.send_message(
-            "Select an image to remove:",
-            view=RemoveImageView(self),
-            ephemeral=True,
-        )
+        await interaction.response.send_modal(_build_remove_image_modal(self))
 
     async def _clear(self, interaction: discord.Interaction):
         cv = ConfirmView()
@@ -693,14 +684,14 @@ class BroadcastView(discord.ui.View):
             await _maybe_update("Sending DMs…")
 
         # ── Final result ──────────────────────────────────────────────────────
-        lines = ["**Broadcast complete!**"]
+        lines = ["✅ **Broadcast complete!**"]
         if self.delivery in ("spawn", "both"):
-            lines.append(f"Channels — {sent_ch} sent  ❌ {failed_ch} failed")
+            lines.append(f"📡 Channels — ✅ {sent_ch} sent  ❌ {failed_ch} failed")
         if self.delivery in ("dms", "both"):
-            lines.append(f"DMs      — {sent_dm} sent  ❌ {failed_dm} failed")
+            lines.append(f"📬 DMs      — ✅ {sent_dm} sent  ❌ {failed_dm} failed")
 
         result_embed = discord.Embed(
-            title="📡 Broadcast Complete",
+            title="Broadcast Complete",
             description="\n".join(lines) + f"\n\n{_bar(total, total)}",
             color=discord.Color.green(),
         )
