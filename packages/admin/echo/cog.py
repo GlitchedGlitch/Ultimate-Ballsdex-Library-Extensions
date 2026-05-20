@@ -179,10 +179,13 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
                 if embed:
                     parts.append("Embed: True")
                 await log_action(" | ".join(parts), bot)
-            except discord.Forbidden:
-                await interaction.followup.send(
-                    f"Could not DM **{user}** — they may have DMs disabled.", ephemeral=True
-                )
+            except (discord.Forbidden, discord.HTTPException) as e:
+                if isinstance(e, discord.HTTPException) and e.code == 50007:
+                    await interaction.followup.send(
+                        f"Could not DM **{user}** — they may have DMs disabled.", ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(f"Error:\n```py\n{e}\n```", ephemeral=True)
             except Exception as e:
                 await interaction.followup.send(f"Error:\n```py\n{e}\n```", ephemeral=True)
             return
