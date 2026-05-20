@@ -11,6 +11,29 @@ FILES = ("__init__.py", "cog.py")
 FOOTER = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
 FOOTER_TIMEOUT = FOOTER + " • Timed out"
 
+BAR_FILLED = "█"
+BAR_EMPTY  = "░"
+BAR_LEN    = 10
+
+
+def _bar(current: int, total: int) -> str:
+    filled = round(BAR_LEN * current / total)
+    pct = round(100 * current / total)
+    return f"`{BAR_FILLED * filled}{BAR_EMPTY * (BAR_LEN - filled)}` {pct}%"
+
+
+def _progress_embed(title: str, steps: list, color: discord.Color) -> discord.Embed:
+    done_count = sum(1 for _, s in steps if s is True)
+    total = len(steps)
+    lines = [f"{{None: '⬜', True: '✅', False: '❌'}[s]} {l}" for l, s in steps]
+    embed = discord.Embed(
+        title=title,
+        description="\n".join(lines) + f"\n\n{_bar(done_count, total)}",
+        color=color,
+    )
+    embed.set_footer(text=FOOTER)
+    return embed
+
 
 def is_installed():
     return os.path.isdir(PKG) and os.path.isfile(os.path.join(PKG, "cog.py"))
@@ -42,6 +65,7 @@ def add_to_config():
             break
     with open(CONFIG, "w") as f:
         f.writelines(lines)
+
 
 def remove_from_config():
     with open(CONFIG, "r") as f:
@@ -125,14 +149,10 @@ class ConfirmDeleteView(View):
         self.parent = parent
 
     async def on_timeout(self):
-        # Only restore main view if we're not already in an error/done state
         if not self.parent.done:
-            for c in self.children:
-                c.disabled = True
             color = discord.Color.gold() if self.parent.installed else discord.Color.greyple()
             await self.parent.message.edit(
-                embed=build_main_embed(self.parent.installed, color),
-                view=self.parent,
+                embed=build_main_embed(self.parent.installed, color), view=self.parent
             )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -144,17 +164,43 @@ class ConfirmDeleteView(View):
     @discord.ui.button(label="Yes, delete it", style=discord.ButtonStyle.danger, emoji="🗑️")
     async def confirm_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
+
+        DELETE_STEPS = [
+            "Unloading extension",
+            "Deleting package files",
+            "Removing from config.yml",
+        ]
+        steps = [(s, None) for s in DELETE_STEPS]
+
+        async def update(i: int, success: bool = True):
+            steps[i] = (steps[i][0], success)
+            await self.parent.message.edit(
+                embed=_progress_embed("🗑️ Deleting Collector Package…", steps, discord.Color.red()),
+                view=None,
+            )
+
+        await self.parent.message.edit(
+            embed=_progress_embed("🗑️ Deleting Collector Package…", steps, discord.Color.red()),
+            view=None,
+        )
+
         try:
-            await self.parent.bot.unload_extension("ballsdex.packages.collector")
-        except Exception:
-            pass
-        try:
+            try:
+                await self.parent.bot.unload_extension("ballsdex.packages.collector")
+            except Exception:
+                pass
+            await update(0)
+
             delete_files()
-            remove_from_config()
             if hasattr(self.parent.bot, "collector_requirements"):
                 del self.parent.bot.collector_requirements
             if hasattr(self.parent.bot, "collector_claimed"):
                 del self.parent.bot.collector_claimed
+            await update(1)
+
+            remove_from_config()
+            await update(2)
+
             self.parent.installed = False
             self.parent.done = True
             self.stop()
@@ -177,6 +223,10 @@ class ConfirmDeleteView(View):
             err = traceback.format_exc()
             self.parent.done = True
             self.stop()
+            for i, (label, state) in enumerate(steps):
+                if state is None:
+                    steps[i] = (label, False)
+                    break
             f = discord.File(io.BytesIO(err.encode()), filename="delete_error.txt")
             await self.parent.message.edit(embed=build_error_embed("deleting", err), view=None)
             await interaction.followup.send(file=f)
@@ -186,8 +236,7 @@ class ConfirmDeleteView(View):
         await interaction.response.defer()
         color = discord.Color.gold() if self.parent.installed else discord.Color.greyple()
         await self.parent.message.edit(
-            embed=build_main_embed(self.parent.installed, color),
-            view=self.parent,
+            embed=build_main_embed(self.parent.installed, color), view=self.parent
         )
 
 
@@ -197,7 +246,7 @@ class CollectorInstallerView(View):
         self.bot = bot
         self.ctx = ctx
         self.installed = installed
-        self.done = False  # True once install/update/delete completes or errors
+        self.done = False
         self.message = None
         self._update_buttons()
 
@@ -209,7 +258,6 @@ class CollectorInstallerView(View):
                 c.disabled = not self.installed
 
     async def on_timeout(self):
-        # Don't overwrite error or success embeds on timeout
         if self.done:
             return
         for c in self.children:
@@ -228,12 +276,51 @@ class CollectorInstallerView(View):
     @discord.ui.button(label="Install", style=discord.ButtonStyle.success, emoji="📥")
     async def install_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
+
+        INSTALL_STEPS = [
+            "Creating package folder",
+            "Downloading files",
+            "Creating requirements file",
+            "Adding to config.yml",
+            "Loading extension",
+            "Syncing command tree",
+        ]
+        steps = [(s, None) for s in INSTALL_STEPS]
+
+        async def update(i: int, success: bool = True):
+            steps[i] = (steps[i][0], success)
+            await self.message.edit(
+                embed=_progress_embed("Installing Collector Package…", steps, discord.Color.blurple()),
+                view=None,
+            )
+
+        await self.message.edit(
+            embed=_progress_embed("Installing Collector Package…", steps, discord.Color.blurple()),
+            view=None,
+        )
+
         try:
             os.makedirs(PKG, exist_ok=True)
+            await update(0)
+
             download_files()
+            await update(1)
+
             ensure_requirements_file()
+            await update(2)
+
             add_to_config()
+            await update(3)
+
             await self.bot.load_extension("ballsdex.packages.collector")
+            await update(4)
+
+            from ballsdex.settings import settings
+            await self.bot.tree.sync()
+            for guild_id in settings.admin_guild_ids:
+                await self.bot.tree.sync(guild=discord.Object(id=guild_id))
+            await update(5)
+
             self.done = True
             self.stop()
             await self.message.edit(
@@ -253,6 +340,10 @@ class CollectorInstallerView(View):
             err = traceback.format_exc()
             self.done = True
             self.stop()
+            for i, (label, state) in enumerate(steps):
+                if state is None:
+                    steps[i] = (label, False)
+                    break
             f = discord.File(io.BytesIO(err.encode()), filename="install_error.txt")
             await self.message.edit(embed=build_error_embed("installing", err), view=None)
             await interaction.followup.send(file=f)
@@ -260,13 +351,43 @@ class CollectorInstallerView(View):
     @discord.ui.button(label="Update", style=discord.ButtonStyle.primary, emoji="🔄")
     async def update_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
+
+        UPDATE_STEPS = [
+            "Downloading latest files",
+            "Reloading extension",
+            "Syncing command tree",
+        ]
+        steps = [(s, None) for s in UPDATE_STEPS]
+
+        async def update(i: int, success: bool = True):
+            steps[i] = (steps[i][0], success)
+            await self.message.edit(
+                embed=_progress_embed("Updating Collector Package…", steps, discord.Color.blurple()),
+                view=None,
+            )
+
+        await self.message.edit(
+            embed=_progress_embed("Updating Collector Package…", steps, discord.Color.blurple()),
+            view=None,
+        )
+
         try:
             download_files()
+            await update(0)
+
             loaded = "ballsdex.packages.collector" in self.bot.extensions
             if loaded:
                 await self.bot.reload_extension("ballsdex.packages.collector")
             else:
                 await self.bot.load_extension("ballsdex.packages.collector")
+            await update(1)
+
+            from ballsdex.settings import settings
+            await self.bot.tree.sync()
+            for guild_id in settings.admin_guild_ids:
+                await self.bot.tree.sync(guild=discord.Object(id=guild_id))
+            await update(2)
+
             self.done = True
             self.stop()
             await self.message.edit(
@@ -285,6 +406,10 @@ class CollectorInstallerView(View):
             err = traceback.format_exc()
             self.done = True
             self.stop()
+            for i, (label, state) in enumerate(steps):
+                if state is None:
+                    steps[i] = (label, False)
+                    break
             f = discord.File(io.BytesIO(err.encode()), filename="update_error.txt")
             await self.message.edit(embed=build_error_embed("updating", err), view=None)
             await interaction.followup.send(file=f)
