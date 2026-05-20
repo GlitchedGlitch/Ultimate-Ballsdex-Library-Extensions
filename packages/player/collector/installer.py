@@ -25,7 +25,10 @@ def _bar(current: int, total: int) -> str:
 def _progress_embed(title: str, steps: list, color: discord.Color) -> discord.Embed:
     done_count = sum(1 for _, s in steps if s is True)
     total = len(steps)
-    lines = [f"{{None: '⬜', True: '✅', False: '❌'}[s]} {l}" for l, s in steps]
+    lines = []
+    for label, state in steps:
+        icon = {None: "⬜", True: "✅", False: "❌"}[state]
+        lines.append(f"{icon} {label}")
     embed = discord.Embed(
         title=title,
         description="\n".join(lines) + f"\n\n{_bar(done_count, total)}",
