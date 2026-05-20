@@ -81,10 +81,10 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
         image="An image to attach (only used when sending, not editing)",
         embed="Wrap the message text in an embed",
         channel="Channel ID or <#mention> to send to — works cross-server (default: current channel)",
-        edit_message="Message link to edit instead of sending a new message",
-        reply="Message link to reply to when sending",
-        delete_message="Message link of the bot message to delete",
         dm="User ID to send the message to via DM (ignores channel parameter)",
+        reply="Message link to reply to when sending",
+        edit_message="Message link to edit instead of sending a new message",
+        delete_message="Message link of the bot message to delete",
     )
     async def echo(
         interaction: discord.Interaction,
@@ -92,10 +92,10 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
         image: discord.Attachment | None = None,
         embed: bool = False,
         channel: str | None = None,
-        edit_message: str | None = None,
-        reply: str | None = None,
-        delete_message: str | None = None,
         dm: str | None = None,
+        reply: str | None = None,
+        edit_message: str | None = None,
+        delete_message: str | None = None,
     ):
         if not message and not image and not edit_message and not delete_message:
             await interaction.response.send_message(
