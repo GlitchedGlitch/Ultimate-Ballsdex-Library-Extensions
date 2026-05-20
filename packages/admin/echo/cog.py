@@ -92,7 +92,7 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
         image: discord.Attachment | None = None,
         embed: bool = False,
         channel: str | None = None,
-        dm: str | None = None,
+        dm: discord.User | None = None,
         reply: str | None = None,
         edit_message: str | None = None,
         delete_message: str | None = None,
@@ -139,55 +139,94 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
 
         # ── DM mode ───────────────────────────────────────────────────────────
         if dm:
-            raw_id = dm.strip().lstrip("<@!").lstrip("<@").rstrip(">")
-            try:
-                user_id = int(raw_id)
-            except ValueError:
-                await interaction.followup.send(
-                    "Invalid user ID. Provide a plain user ID or a `<@mention>`.",
-                    ephemeral=True,
-                )
-                return
-
-            try:
-                user = await bot.fetch_user(user_id)
-            except discord.NotFound:
-                await interaction.followup.send(
-                    "Could not find a user with that ID.", ephemeral=True
-                )
-                return
+            user = dm
 
             kwargs: dict = {}
+
             if embed:
-                kwargs["embed"] = discord.Embed(description=message or "")
+                kwargs["embed"] = discord.Embed(
+                    description=message or ""
+                )
+
             elif message:
                 kwargs["content"] = message
+
             if image:
-                kwargs["files"] = [await image.to_file()]
+                kwargs["files"] = [
+                    await image.to_file()
+                ]
 
             try:
-                sent_msg = await user.send(**kwargs)
-                await interaction.followup.send(
-                    f"DM sent to **{user}**!", ephemeral=True
+                sent_msg = await user.send(
+                    **kwargs
                 )
+
+                await interaction.followup.send(
+                    f"DM sent to **{user}**!",
+                    ephemeral=True,
+                )
+
                 parts = [
-                    f"{interaction.user.name} sent a DM to {user} ({user.id}).",
-                    f"Message: {message!r}" if message else "Message: [image only]",
+                    (
+                        f"{interaction.user.name} "
+                        f"sent a DM to "
+                        f"{user} ({user.id})."
+                    ),
+                    (
+                        f"Message: {message!r}"
+                        if message
+                        else "Message: [image only]"
+                    ),
                 ]
+
                 if image:
-                    parts.append(f"Image: {image.filename} {image.url}")
+                    parts.append(
+                        f"Image: "
+                        f"{image.filename} "
+                        f"{image.url}"
+                    )
+
                 if embed:
                     parts.append("Embed: True")
-                await log_action(" | ".join(parts), bot)
-            except (discord.Forbidden, discord.HTTPException) as e:
-                if isinstance(e, discord.HTTPException) and e.code == 50007:
-                    await interaction.followup.send(
-                        f"Could not DM **{user}** — they may have DMs disabled.", ephemeral=True
+
+                await log_action(
+                    " | ".join(parts),
+                    bot,
+                )
+
+            except (
+                discord.Forbidden,
+                discord.HTTPException,
+            ) as e:
+                if (
+                    isinstance(
+                        e,
+                        discord.HTTPException,
                     )
+                    and e.code == 50007
+                ):
+                    await interaction.followup.send(
+                        (
+                            f"Could not DM "
+                            f"**{user}** — "
+                            f"they may have "
+                            f"DMs disabled."
+                        ),
+                        ephemeral=True,
+                    )
+
                 else:
-                    await interaction.followup.send(f"Error:\n```py\n{e}\n```", ephemeral=True)
+                    await interaction.followup.send(
+                        f"Error:\n```py\n{e}\n```",
+                        ephemeral=True,
+                    )
+
             except Exception as e:
-                await interaction.followup.send(f"Error:\n```py\n{e}\n```", ephemeral=True)
+                await interaction.followup.send(
+                    f"Error:\n```py\n{e}\n```",
+                    ephemeral=True,
+                )
+
             return
 
         # ── Resolve channel ───────────────────────────────────────────────────
@@ -290,3 +329,4 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
 
     echo._is_echo = True  # type: ignore
     return echo
+    
