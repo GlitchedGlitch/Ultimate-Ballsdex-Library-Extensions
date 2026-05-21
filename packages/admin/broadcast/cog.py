@@ -6,7 +6,7 @@ Commands:
 
 Spawn channels are pulled automatically from GuildConfig (every guild that has
 a spawn channel configured). Player DMs are sent to every Player row in the
-database. No manual channel list is needed.
+database.
 """
 
 from __future__ import annotations
@@ -101,9 +101,9 @@ class ConfirmView(discord.ui.View):
 
 def _build_remove_image_modal(parent: "BroadcastView") -> discord.ui.Modal:
     count = len(parent.image_data)
-    modal = discord.ui.Modal(title="Remove Image")
+    modal = discord.ui.Modal(title="Remove File)
     inp = discord.ui.TextInput(
-        label=f"Image number to remove (1–{count})",
+        label=f"File number to remove (1–{count})",
         placeholder=f"Enter a number between 1 and {count}",
         min_length=1,
         max_length=1,
@@ -244,7 +244,7 @@ class BroadcastView(discord.ui.View):
         img_count = len(self.image_data)
 
         add_img_btn = discord.ui.Button(
-            label=f"Add Image ({img_count}/5)" if img_count else "Add Image",
+            label=f"Add File ({img_count}/5)" if img_count else "Add File",
             style=discord.ButtonStyle.secondary,
             emoji="🖼️",
             disabled=img_count >= 5 or self._awaiting_image,
@@ -255,7 +255,7 @@ class BroadcastView(discord.ui.View):
 
         if self.image_data:
             remove_img_btn = discord.ui.Button(
-                label="Remove Image",
+                label="Remove File",
                 style=discord.ButtonStyle.danger,
                 emoji="🗑️",
                 row=3,
@@ -276,13 +276,13 @@ class BroadcastView(discord.ui.View):
         if self.use_embed:
             desc += f"**Title:** {self.embed_title}\n**Color:** {self.embed_color_label}\n"
         if self.image_data:
-            desc += f"**Images:** {len(self.image_data)}\n"
+            desc += f"**Files:** {len(self.image_data)}\n"
             for i, (_, filename) in enumerate(self.image_data, 1):
                 desc += f"  {i}. {filename}\n"
         desc += f"\n**Message preview:**\n{snippet}"
 
         return discord.Embed(
-            title="📡 Broadcast Composer",
+            title="Broadcast Composer",
             description=desc,
             color=self.embed_color if self.use_embed else discord.Color.blurple(),
         )
@@ -302,7 +302,7 @@ class BroadcastView(discord.ui.View):
         return kwargs
 
     async def _fetch_image_files(self) -> list[discord.File]:
-        """Download stored image URLs and return as discord.File objects."""
+        """Download stored file URLs and return as discord.File objects."""
         import aiohttp
         files = []
         async with aiohttp.ClientSession() as session:
@@ -407,10 +407,10 @@ class BroadcastView(discord.ui.View):
         await interaction.response.send_modal(modal)
 
     async def _add_image(self, interaction: discord.Interaction):
-        """Ask the user to send an image in the channel, then capture and delete it."""
+        """Ask the user to send a file in the channel, then capture and delete it."""
         if len(self.image_urls) >= 5:
             await interaction.response.send_message(
-                "Maximum of 5 images allowed.", ephemeral=True
+                "Maximum of 5 files allowed.", ephemeral=True
             )
             return
 
@@ -420,7 +420,7 @@ class BroadcastView(discord.ui.View):
         # Acknowledge the button interaction first, then send ephemeral prompt via followup
         await interaction.response.edit_message(embed=self._composer_embed(), view=self)
         prompt = await interaction.followup.send(
-            "📎 Please send your image now in this channel. "
+            "Please send your file now in this channel. "
             "It will be deleted immediately after capture. Send `cancel` to abort.",
             ephemeral=True,
             wait=True,
@@ -443,7 +443,7 @@ class BroadcastView(discord.ui.View):
             except Exception:
                 pass
             await interaction.edit_original_response(
-                content="Image upload timed out.", embed=self._composer_embed(), view=self
+                content="File upload timed out.", embed=self._composer_embed(), view=self
             )
             return
 
@@ -594,7 +594,7 @@ class BroadcastView(discord.ui.View):
 
         if total == 0:
             await original_interaction.edit_original_response(
-                content="❌ No targets found. Make sure servers have spawn channels configured.",
+                content="No targets found. Make sure servers have spawn channels configured.",
                 embed=None,
                 view=None,
             )
@@ -690,7 +690,7 @@ class BroadcastView(discord.ui.View):
             lines.append(f"DMs      — ✅ {sent_dm} sent  ❌ {failed_dm} failed")
 
         result_embed = discord.Embed(
-            title="📡 Broadcast Complete",
+            title="Broadcast Complete",
             description="\n".join(lines) + f"\n\n{_bar(total, total)}",
             color=discord.Color.green(),
         )
@@ -703,7 +703,7 @@ class BroadcastView(discord.ui.View):
             f"{interaction.user.name} sent a broadcast | "
             f"Delivery: {self.delivery} | "
             f"Embed: {self.use_embed} | "
-            f"Images: {len(self.image_urls)} | "
+            f"Files: {len(self.image_urls)} | "
             f"Message: {self.content[:200]!r}",
             self.bot,
         )
