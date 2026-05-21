@@ -1,4 +1,8 @@
-# How to install
+# Echo Package 
+## What is this?
+This package allows you to send messages as your dex! Please don't send weird shi
+
+## How to install
 Run this eval
 
 ```py
