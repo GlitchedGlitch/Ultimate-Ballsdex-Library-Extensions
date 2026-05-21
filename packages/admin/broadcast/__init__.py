@@ -17,12 +17,12 @@ async def setup(bot: "BallsDexBot"):
         group = admin_cog.__cog_app_commands_group__
 
         for cmd in list(group.commands):
-            if isinstance(cmd, discord.app_commands.Group) and hasattr(cmd, "_is_broadcast"):
+            if isinstance(cmd, discord.app_commands.Command) and hasattr(cmd, "_is_broadcast"):
                 group.remove_command(cmd.name)
-                log.info("Removed existing broadcast subgroup before re-adding")
+                log.info("Removed existing broadcast command before re-adding")
 
-        subgroup = BroadcastAdminCommand(bot)
-        group.add_command(subgroup)
+        cmd = BroadcastAdminCommand(bot)
+        group.add_command(cmd)
         log.info("Attached /admin broadcast to Admin cog group")
     else:
         log.warning(
