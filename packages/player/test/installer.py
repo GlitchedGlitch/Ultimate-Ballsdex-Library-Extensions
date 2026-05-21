@@ -1,1 +1,1 @@
-await ctx.send("Skibidi")
+print("Skibidi")
