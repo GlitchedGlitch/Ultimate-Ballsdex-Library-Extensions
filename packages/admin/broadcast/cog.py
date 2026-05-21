@@ -115,11 +115,11 @@ def _build_remove_image_modal(parent: "BroadcastView") -> discord.ui.Modal:
         try:
             idx = int(inp.value) - 1
         except ValueError:
-            await mi.response.send_message("❌ Please enter a valid number.", ephemeral=True)
+            await mi.response.send_message("Please enter a valid number.", ephemeral=True)
             return
         if idx < 0 or idx >= len(parent.image_data):
             await mi.response.send_message(
-                f"❌ Invalid number. Choose between 1 and {len(parent.image_data)}.",
+                f"Invalid number. Choose between 1 and {len(parent.image_data)}.",
                 ephemeral=True,
             )
             return
@@ -393,7 +393,7 @@ class BroadcastView(discord.ui.View):
             c = _parse_color(inp.value)
             if c is None:
                 await mi.response.send_message(
-                    "❌ Invalid color. Use a name (red, blue, purple…) or hex (#FF0000).",
+                    "Invalid color. Use a name (red, blue, purple…) or hex (#FF0000).",
                     ephemeral=True,
                 )
                 return
@@ -410,7 +410,7 @@ class BroadcastView(discord.ui.View):
         """Ask the user to send an image in the channel, then capture and delete it."""
         if len(self.image_urls) >= 5:
             await interaction.response.send_message(
-                "❌ Maximum of 5 images allowed.", ephemeral=True
+                "Maximum of 5 images allowed.", ephemeral=True
             )
             return
 
@@ -443,7 +443,7 @@ class BroadcastView(discord.ui.View):
             except Exception:
                 pass
             await interaction.edit_original_response(
-                content="⏱️ Image upload timed out.", embed=self._composer_embed(), view=self
+                content="Image upload timed out.", embed=self._composer_embed(), view=self
             )
             return
 
@@ -504,7 +504,7 @@ class BroadcastView(discord.ui.View):
     async def _clear(self, interaction: discord.Interaction):
         cv = ConfirmView()
         await interaction.response.send_message(
-            "⚠️ Clear the message content and all images?", view=cv, ephemeral=True
+            "Clear the message content and all images?", view=cv, ephemeral=True
         )
         await cv.wait()
         if cv.confirmed:
@@ -513,7 +513,7 @@ class BroadcastView(discord.ui.View):
             self.image_data = []
             self._rebuild()
         await interaction.edit_original_response(
-            content="✅ Cleared." if cv.confirmed else "Cancelled.", view=None
+            content="Cleared." if cv.confirmed else "Cancelled.", view=None
         )
         if cv.confirmed:
             await self._refresh(interaction)
@@ -521,7 +521,7 @@ class BroadcastView(discord.ui.View):
     async def _close(self, interaction: discord.Interaction):
         cv = ConfirmView()
         await interaction.response.send_message(
-            "⚠️ Close the broadcast composer?", view=cv, ephemeral=True
+            "Close the broadcast composer?", view=cv, ephemeral=True
         )
         await cv.wait()
         if cv.confirmed:
@@ -615,11 +615,11 @@ class BroadcastView(discord.ui.View):
         def _progress_embed(stage: str) -> discord.Embed:
             lines = [f"**{stage}**\n{_bar(done, total)}\n"]
             if self.delivery in ("spawn", "both"):
-                lines.append(f"📡 Channels — ✅ {sent_ch}  ❌ {failed_ch} / {len(spawn_channel_ids)} total")
+                lines.append(f"Channels — ✅ {sent_ch}  ❌ {failed_ch} / {len(spawn_channel_ids)} total")
             if self.delivery in ("dms", "both"):
-                lines.append(f"📬 DMs      — ✅ {sent_dm}  ❌ {failed_dm} / {len(player_discord_ids)} total")
+                lines.append(f"DMs      — ✅ {sent_dm}  ❌ {failed_dm} / {len(player_discord_ids)} total")
             return discord.Embed(
-                title="📡 Broadcasting…",
+                title="Broadcasting…",
                 description="\n".join(lines),
                 color=discord.Color.blurple(),
             )
@@ -683,11 +683,11 @@ class BroadcastView(discord.ui.View):
             await _maybe_update("Sending DMs…")
 
         # ── Final result ──────────────────────────────────────────────────────
-        lines = ["✅ **Broadcast complete!**"]
+        lines = ["**Broadcast complete!**"]
         if self.delivery in ("spawn", "both"):
-            lines.append(f"📡 Channels — ✅ {sent_ch} sent  ❌ {failed_ch} failed")
+            lines.append(f"Channels — ✅ {sent_ch} sent  ❌ {failed_ch} failed")
         if self.delivery in ("dms", "both"):
-            lines.append(f"📬 DMs      — ✅ {sent_dm} sent  ❌ {failed_dm} failed")
+            lines.append(f"DMs      — ✅ {sent_dm} sent  ❌ {failed_dm} failed")
 
         result_embed = discord.Embed(
             title="📡 Broadcast Complete",
