@@ -1,4 +1,10 @@
-# How to install
+# Collector Package
+## What is this?
+This packages creates 2 commands + 3 admin commands for collector balls!
+For admins: Set custom amount requirements to obtain a collector ball. The special event of the card is decided by you!
+For players: Reach the minimum amount required of a ball to obtain a special version of that ball! You can only redeem once duh
+
+## How to install
 
 Run this eval
 ```py
