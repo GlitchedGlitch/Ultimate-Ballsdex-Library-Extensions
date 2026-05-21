@@ -101,7 +101,7 @@ class ConfirmView(discord.ui.View):
 
 def _build_remove_image_modal(parent: "BroadcastView") -> discord.ui.Modal:
     count = len(parent.image_data)
-    modal = discord.ui.Modal(title="Remove File)
+    modal = discord.ui.Modal(title="Remove File")
     inp = discord.ui.TextInput(
         label=f"File number to remove (1–{count})",
         placeholder=f"Enter a number between 1 and {count}",
