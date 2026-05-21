@@ -2,7 +2,7 @@
 Broadcast package for BallsDex.
 
 Commands:
-  /admin broadcast send — open the broadcast composer (ephemeral)
+  /admin broadcast — open the broadcast composer
 
 Spawn channels are pulled automatically from GuildConfig (every guild that has
 a spawn channel configured). Player DMs are sent to every Player row in the
@@ -101,7 +101,7 @@ class ConfirmView(discord.ui.View):
 
 def _build_remove_image_modal(parent: "BroadcastView") -> discord.ui.Modal:
     count = len(parent.image_data)
-    modal = discord.ui.Modal(title="Remove File")
+    modal = discord.ui.Modal(title="Remove Image")
     inp = discord.ui.TextInput(
         label=f"File number to remove (1–{count})",
         placeholder=f"Enter a number between 1 and {count}",
@@ -244,7 +244,7 @@ class BroadcastView(discord.ui.View):
         img_count = len(self.image_data)
 
         add_img_btn = discord.ui.Button(
-            label=f"Add File ({img_count}/5)" if img_count else "Add File",
+            label=f"Add File ({img_count}/5)" if img_count else "Add Files",
             style=discord.ButtonStyle.secondary,
             emoji="🖼️",
             disabled=img_count >= 5 or self._awaiting_image,
@@ -255,7 +255,7 @@ class BroadcastView(discord.ui.View):
 
         if self.image_data:
             remove_img_btn = discord.ui.Button(
-                label="Remove File",
+                label="Remove Image",
                 style=discord.ButtonStyle.danger,
                 emoji="🗑️",
                 row=3,
@@ -443,7 +443,7 @@ class BroadcastView(discord.ui.View):
             except Exception:
                 pass
             await interaction.edit_original_response(
-                content="File upload timed out.", embed=self._composer_embed(), view=self
+                content="Files upload timed out.", embed=self._composer_embed(), view=self
             )
             return
 
@@ -477,9 +477,7 @@ class BroadcastView(discord.ui.View):
                     async with session.get(attachment.url) as resp:
                         if resp.status == 200:
                             data = await resp.read()
-                            ext = attachment.filename.rsplit(".", 1)[-1] or "png"
-                            filename = f"broadcast_{len(self.image_data) + 1}.{ext}"
-                            self.image_data.append((data, filename))
+                            self.image_data.append((data, attachment.filename))
                             self.image_urls.append(attachment.filename)  # display label only
                 except Exception:
                     pass
@@ -504,7 +502,7 @@ class BroadcastView(discord.ui.View):
     async def _clear(self, interaction: discord.Interaction):
         cv = ConfirmView()
         await interaction.response.send_message(
-            "Clear the message content and all images?", view=cv, ephemeral=True
+            "Clear the message content and all files?", view=cv, ephemeral=True
         )
         await cv.wait()
         if cv.confirmed:
@@ -519,17 +517,10 @@ class BroadcastView(discord.ui.View):
             await self._refresh(interaction)
 
     async def _close(self, interaction: discord.Interaction):
-        cv = ConfirmView()
-        await interaction.response.send_message(
-            "Close the broadcast composer?", view=cv, ephemeral=True
+        await interaction.response.edit_message(
+            content="Broadcast Composer Closed.", embed=None, view=None
         )
-        await cv.wait()
-        if cv.confirmed:
-            await interaction.edit_original_response(content="Composer closed.", view=None)
-            await interaction.delete_original_response()
-            self.stop()
-        else:
-            await interaction.edit_original_response(content="Cancelled.", view=None)
+        self.stop()
 
     # ── Confirmation step (same message) ──────────────────────────────────────
 
@@ -746,19 +737,17 @@ class BroadcastCog(commands.Cog):
 
 # ── Slash command group ───────────────────────────────────────────────────────
 
-def BroadcastAdminCommand(bot: "BallsDexBot") -> app_commands.Group:
-    group = app_commands.Group(
+def BroadcastAdminCommand(bot: "BallsDexBot") -> app_commands.Command:
+    @app_commands.command(
         name="broadcast",
-        description="Broadcast messages to all spawn channels or all players",
+        description="Open the broadcast composer",
     )
-    group._is_broadcast = True  # type: ignore
-
-    @group.command(name="send", description="Open the broadcast composer")
     @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
-    async def broadcast_send(interaction: discord.Interaction):
+    async def broadcast(interaction: discord.Interaction):
         view = BroadcastView(bot, interaction.user)
         await interaction.response.send_message(
             embed=view._composer_embed(), view=view, ephemeral=True
         )
 
-    return group
+    broadcast._is_broadcast = True  # type: ignore
+    return broadcast
