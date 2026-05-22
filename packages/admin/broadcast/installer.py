@@ -1,16 +1,14 @@
-import asyncio, base64, io, os, re, requests, traceback, discord
-from discord.ui import View, Button, Modal, TextInput
+import asyncio, base64, io, os, requests, traceback, discord
+from discord.ui import View, Button
 
 REPO = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
-BASE = "https://api.github.com/repos/{}/contents/packages/admin/echo/{}".format(REPO, "{}")
-PKG = "/code/ballsdex/packages/echo"
+BASE = "https://api.github.com/repos/{}/contents/packages/admin/broadcast/{}".format(REPO, "{}")
+PKG = "/code/ballsdex/packages/broadcast"
 CONFIG = "/code/config.yml"
-NAME_FILE = os.path.join(PKG, "name.txt")
-PACKAGE_ENTRY = "  - ballsdex.packages.echo"
+PACKAGE_ENTRY = "  - ballsdex.packages.broadcast"
 FILES = ("__init__.py", "cog.py")
 FOOTER = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
 FOOTER_TIMEOUT = FOOTER + " • Timed out"
-DEFAULT_NAME = "echo"
 
 BAR_FILLED = "█"
 BAR_EMPTY  = "░"
@@ -41,16 +39,16 @@ def _progress_embed(title: str, steps: list, color: discord.Color) -> discord.Em
 
 # ── Admin group + sync helpers ────────────────────────────────────────────────
 
-def _remove_echo_command(bot, cmd_name: str):
+def _remove_broadcast_command(bot):
     admin_cog = bot.get_cog("Admin")
     if admin_cog and admin_cog.__cog_app_commands_group__:
         group = admin_cog.__cog_app_commands_group__
-        if group.get_command(cmd_name):
-            group.remove_command(cmd_name)
+        cmd = group.get_command("broadcast")
+        if cmd is not None:
+            group.remove_command("broadcast")
 
 
 async def _sync_tree(bot):
-    """Sync global tree and all admin guild trees concurrently."""
     from ballsdex.settings import settings
     guild_syncs = [
         bot.tree.sync(guild=discord.Object(id=gid))
@@ -63,20 +61,6 @@ async def _sync_tree(bot):
 
 def is_installed():
     return os.path.isdir(PKG) and os.path.isfile(os.path.join(PKG, "cog.py"))
-
-
-def get_command_name() -> str:
-    try:
-        with open(NAME_FILE, "r") as f:
-            name = f.read().strip()
-            return name if name else DEFAULT_NAME
-    except FileNotFoundError:
-        return DEFAULT_NAME
-
-
-def save_command_name(name: str):
-    with open(NAME_FILE, "w") as f:
-        f.write(name.strip())
 
 
 def download_files():
@@ -100,10 +84,11 @@ def add_to_config():
     with open(CONFIG, "w") as f:
         f.writelines(lines)
 
+
 def remove_from_config():
     with open(CONFIG, "r") as f:
         lines = f.readlines()
-    lines = [l for l in lines if "ballsdex.packages.echo" not in l]
+    lines = [l for l in lines if "ballsdex.packages.broadcast" not in l]
     with open(CONFIG, "w") as f:
         f.writelines(lines)
 
@@ -116,23 +101,23 @@ def delete_files():
 
 # ── Embeds ────────────────────────────────────────────────────────────────────
 
-def build_main_embed(installed: bool, color: discord.Color, cmd_name: str) -> discord.Embed:
+def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
     embed = discord.Embed(
-        title="Echo Package",
+        title="Broadcast Package",
         description=(
-            "Adds an admin echo command to your BallsDex instance.\n\n"
+            "Adds an admin broadcast command to your BallsDex instance.\n\n"
             "**Commands**\n"
-            f"• `/admin {cmd_name}` — send, edit or reply to messages as the bot\n\n"
-            "**Parameters**\n"
-            "• `message` — text content to send or edit with\n"
-            "• `image` — file attachment to include\n"
-            "• `embed` — wrap message in an embed\n"
-            "• `channel` — target channel (works cross-server)\n"
-            "• `dm` — dms a specified user\n"
-            "• `reply` — message link to reply to\n"
-            "• `edit_message` — message link to edit instead of sending\n" 
-            "• `delete_message` — message link to delete the message\n\n"
-            f"**Command name:** `/admin {cmd_name}`\n"
+            "• `/admin broadcast` — open the broadcast composer\n\n"
+            "**Delivery Options**\n"
+            "• Spawn Channels Only\n"
+            "• Player DMs Only\n"
+            "• Both\n\n"
+            "**Composer Features**\n"
+            "• Edit message content via modal\n"
+            "• Toggle embed on/off\n"
+            "• Set embed title and line color (name or hex)\n"
+            "• Live status preview\n"
+            "• Send / Clear / Close with confirmations\n\n"
             f"**Status:** {'✅ Installed' if installed else '❌ Not installed'}"
         ),
         color=color,
@@ -143,12 +128,12 @@ def build_main_embed(installed: bool, color: discord.Color, cmd_name: str) -> di
 
 def build_confirm_embed() -> discord.Embed:
     embed = discord.Embed(
-        title="Delete Echo Package",
+        title="Delete Broadcast Package",
         description=(
-            "⚠️ **Are you sure you want to delete the Echo package?**\n\n"
+            "⚠️ **Are you sure you want to delete the Broadcast package?**\n\n"
             "This will:\n"
             "• Unload the package from the bot\n"
-            "• Remove `/admin echo` from Discord\n"
+            "• Remove `/admin broadcast` from Discord\n"
             "• Delete all package files\n"
             "• Remove it from `config.yml`\n\n"
             "This action **cannot be undone** without reinstalling."
@@ -180,128 +165,10 @@ def build_result_embed(title: str, description: str, color: discord.Color) -> di
     return embed
 
 
-# ── Name modal ────────────────────────────────────────────────────────────────
-
-class CommandNameModal(Modal, title="Set Echo Command Name"):
-    name_input = TextInput(
-        label="Command name (group is always /admin)",
-        placeholder="echo",
-        min_length=1,
-        max_length=32,
-        required=True,
-    )
-
-    def __init__(self, parent: "EchoInstallerView"):
-        super().__init__()
-        self.parent = parent
-        self.name_input.default = self.parent.cmd_name
-
-    async def on_submit(self, interaction: discord.Interaction):
-        raw = self.name_input.value.strip().lower().replace(" ", "-")
-        if not re.match(r"^[a-z0-9\-]{1,32}$", raw):
-            await interaction.response.send_message(
-                "Invalid name. Use only lowercase letters, numbers and hyphens.",
-                ephemeral=True,
-            )
-            return
-
-        # Acknowledge the modal immediately so Discord doesn't time out
-        await interaction.response.defer()
-
-        if not self.parent.installed:
-            # Not installed yet — just update the preview
-            self.parent.cmd_name = raw
-            await self.parent.message.edit(
-                embed=build_main_embed(False, discord.Color.greyple(), raw),
-                view=self.parent,
-            )
-            return
-
-        # ── Installed: show rename progress ───────────────────────────────────
-        old_name = self.parent.cmd_name
-        RENAME_STEPS = [
-            f"Removing /admin {old_name}",
-            "Unloading extension",
-            "Saving new command name",
-            "Reloading extension",
-            "Syncing command tree",
-        ]
-        steps = [(s, None) for s in RENAME_STEPS]
-
-        async def update(i: int, success: bool = True):
-            steps[i] = (steps[i][0], success)
-            await self.parent.message.edit(
-                embed=_progress_embed(
-                    f"Renaming to /admin {raw}…", steps, discord.Color.blurple()
-                ),
-                view=None,
-            )
-
-        await self.parent.message.edit(
-            embed=_progress_embed(
-                f"Renaming to /admin {raw}…", steps, discord.Color.blurple()
-            ),
-            view=None,
-        )
-
-        try:
-            # 1. Remove old command from admin group
-            _remove_echo_command(self.parent.bot, old_name)
-            await update(0)
-
-            # 2. Unload — so load_extension works cleanly below
-            try:
-                await self.parent.bot.unload_extension("ballsdex.packages.echo")
-            except Exception:
-                pass
-            await update(1)
-
-            # 3. Save new name so __init__.py picks it up on next load
-            save_command_name(raw)
-            self.parent.cmd_name = raw
-            await update(2)
-
-            # 4. Load fresh — avoids the "already loaded" error
-            await self.parent.bot.load_extension("ballsdex.packages.echo")
-            await update(3)
-
-            # 5. Sync
-            await _sync_tree(self.parent.bot)
-            await update(4)
-
-            await self.parent.message.edit(
-                embed=build_result_embed(
-                    "Successfully Renamed",
-                    (
-                        f"Command renamed from `/admin {old_name}` to `/admin {raw}`.\n\n"
-                        "Run this installer again to update, rename or remove the package."
-                    ),
-                    discord.Color.blurple(),
-                ),
-                view=None,
-            )
-            self.parent.done = True
-            self.parent.stop()
-
-        except Exception:
-            err = traceback.format_exc()
-            for i, (label, state) in enumerate(steps):
-                if state is None:
-                    steps[i] = (label, False)
-                    break
-            f = discord.File(io.BytesIO(err.encode()), filename="rename_error.txt")
-            await self.parent.message.edit(
-                embed=build_error_embed("renaming", err), view=None
-            )
-            await interaction.followup.send(file=f)
-            self.parent.done = True
-            self.parent.stop()
-
-
 # ── Confirm delete ────────────────────────────────────────────────────────────
 
 class ConfirmDeleteView(View):
-    def __init__(self, parent: "EchoInstallerView"):
+    def __init__(self, parent: "BroadcastInstallerView"):
         super().__init__(timeout=60)
         self.parent = parent
 
@@ -309,7 +176,7 @@ class ConfirmDeleteView(View):
         if not self.parent.done:
             color = discord.Color.gold() if self.parent.installed else discord.Color.greyple()
             await self.parent.message.edit(
-                embed=build_main_embed(self.parent.installed, color, self.parent.cmd_name),
+                embed=build_main_embed(self.parent.installed, color),
                 view=self.parent,
             )
 
@@ -335,21 +202,21 @@ class ConfirmDeleteView(View):
         async def update(i: int, success: bool = True):
             steps[i] = (steps[i][0], success)
             await self.parent.message.edit(
-                embed=_progress_embed("Deleting Echo Package…", steps, discord.Color.red()),
+                embed=_progress_embed("Deleting Broadcast Package…", steps, discord.Color.red()),
                 view=None,
             )
 
         await self.parent.message.edit(
-            embed=_progress_embed("Deleting Echo Package…", steps, discord.Color.red()),
+            embed=_progress_embed("Deleting Broadcast Package…", steps, discord.Color.red()),
             view=None,
         )
 
         try:
-            _remove_echo_command(self.parent.bot, self.parent.cmd_name)
+            _remove_broadcast_command(self.parent.bot)
             await update(0)
 
             try:
-                await self.parent.bot.unload_extension("ballsdex.packages.echo")
+                await self.parent.bot.unload_extension("ballsdex.packages.broadcast")
             except Exception:
                 pass
             await update(1)
@@ -370,8 +237,8 @@ class ConfirmDeleteView(View):
                 embed=build_result_embed(
                     "Successfully Deleted",
                     (
-                        "The **Echo Package** has been removed.\n\n"
-                        "• `/admin echo` removed from Discord\n"
+                        "The **Broadcast Package** has been removed.\n\n"
+                        "• `/admin broadcast` removed from Discord\n"
                         "• All package files deleted\n"
                         "• Removed from `config.yml`\n\n"
                         "Restart the bot to fully apply the config change.\n\n"
@@ -398,20 +265,19 @@ class ConfirmDeleteView(View):
         await interaction.response.defer()
         color = discord.Color.gold() if self.parent.installed else discord.Color.greyple()
         await self.parent.message.edit(
-            embed=build_main_embed(self.parent.installed, color, self.parent.cmd_name),
+            embed=build_main_embed(self.parent.installed, color),
             view=self.parent,
         )
 
 
 # ── Main installer view ───────────────────────────────────────────────────────
 
-class EchoInstallerView(View):
-    def __init__(self, bot, ctx, installed: bool, cmd_name: str):
+class BroadcastInstallerView(View):
+    def __init__(self, bot, ctx, installed: bool):
         super().__init__(timeout=180)
         self.bot = bot
         self.ctx = ctx
         self.installed = installed
-        self.cmd_name = cmd_name
         self.done = False
         self.message = None
         self._update_buttons()
@@ -429,7 +295,7 @@ class EchoInstallerView(View):
         for c in self.children:
             c.disabled = True
         if self.message:
-            embed = build_main_embed(self.installed, discord.Color.dark_grey(), self.cmd_name)
+            embed = build_main_embed(self.installed, discord.Color.dark_grey())
             embed.set_footer(text=FOOTER_TIMEOUT)
             await self.message.edit(embed=embed, view=self)
 
@@ -446,7 +312,6 @@ class EchoInstallerView(View):
         INSTALL_STEPS = [
             "Creating package folder",
             "Downloading files",
-            "Saving command name",
             "Adding to config.yml",
             "Loading extension",
             "Syncing command tree",
@@ -456,12 +321,12 @@ class EchoInstallerView(View):
         async def update(i: int, success: bool = True):
             steps[i] = (steps[i][0], success)
             await self.message.edit(
-                embed=_progress_embed("Installing Echo Package…", steps, discord.Color.blurple()),
+                embed=_progress_embed("Installing Broadcast Package…", steps, discord.Color.blurple()),
                 view=None,
             )
 
         await self.message.edit(
-            embed=_progress_embed("Installing Echo Package…", steps, discord.Color.blurple()),
+            embed=_progress_embed("Installing Broadcast Package…", steps, discord.Color.blurple()),
             view=None,
         )
 
@@ -472,17 +337,14 @@ class EchoInstallerView(View):
             download_files()
             await update(1)
 
-            save_command_name(self.cmd_name)
+            add_to_config()
             await update(2)
 
-            add_to_config()
+            await self.bot.load_extension("ballsdex.packages.broadcast")
             await update(3)
 
-            await self.bot.load_extension("ballsdex.packages.echo")
-            await update(4)
-
             await _sync_tree(self.bot)
-            await update(5)
+            await update(4)
 
             self.done = True
             self.stop()
@@ -490,8 +352,8 @@ class EchoInstallerView(View):
                 embed=build_result_embed(
                     "Successfully Installed",
                     (
-                        f"The **Echo Package** has been installed as `/admin {self.cmd_name}`.\n\n"
-                        "Run this installer again to update, rename or remove the package."
+                        "The **Broadcast Package** has been installed as `/admin broadcast`.\n\n"
+                        "Run this installer again to update or remove the package."
                     ),
                     discord.Color.green(),
                 ),
@@ -523,12 +385,12 @@ class EchoInstallerView(View):
         async def update(i: int, success: bool = True):
             steps[i] = (steps[i][0], success)
             await self.message.edit(
-                embed=_progress_embed("Updating Echo Package…", steps, discord.Color.blurple()),
+                embed=_progress_embed("Updating Broadcast Package…", steps, discord.Color.blurple()),
                 view=None,
             )
 
         await self.message.edit(
-            embed=_progress_embed("Updating Echo Package…", steps, discord.Color.blurple()),
+            embed=_progress_embed("Updating Broadcast Package…", steps, discord.Color.blurple()),
             view=None,
         )
 
@@ -536,11 +398,11 @@ class EchoInstallerView(View):
             download_files()
             await update(0)
 
-            loaded = "ballsdex.packages.echo" in self.bot.extensions
+            loaded = "ballsdex.packages.broadcast" in self.bot.extensions
             if loaded:
-                await self.bot.reload_extension("ballsdex.packages.echo")
+                await self.bot.reload_extension("ballsdex.packages.broadcast")
             else:
-                await self.bot.load_extension("ballsdex.packages.echo")
+                await self.bot.load_extension("ballsdex.packages.broadcast")
             await update(1)
 
             await _sync_tree(self.bot)
@@ -552,8 +414,8 @@ class EchoInstallerView(View):
                 embed=build_result_embed(
                     "Successfully Updated",
                     (
-                        "The **Echo Package** has been updated and reloaded.\n\n"
-                        "Run this installer again to update, rename or remove the package."
+                        "The **Broadcast Package** has been updated and reloaded.\n\n"
+                        "Run this installer again to update or remove the package."
                     ),
                     discord.Color.blue(),
                 ),
@@ -571,10 +433,6 @@ class EchoInstallerView(View):
             await self.message.edit(embed=build_error_embed("updating", err), view=None)
             await interaction.followup.send(file=f)
 
-    @discord.ui.button(label="Rename", style=discord.ButtonStyle.secondary, emoji="✏️")
-    async def rename_button(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_modal(CommandNameModal(self))
-
     @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger, emoji="🗑️")
     async def delete_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
@@ -584,8 +442,7 @@ class EchoInstallerView(View):
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 installed = is_installed()
-cmd_name = get_command_name() if installed else DEFAULT_NAME
-view = EchoInstallerView(bot, ctx, installed, cmd_name)
+view = BroadcastInstallerView(bot, ctx, installed)
 initial_color = discord.Color.gold() if installed else discord.Color.greyple()
-message = await ctx.send(embed=build_main_embed(installed, initial_color, cmd_name), view=view)
+message = await ctx.send(embed=build_main_embed(installed, initial_color), view=view)
 view.message = message

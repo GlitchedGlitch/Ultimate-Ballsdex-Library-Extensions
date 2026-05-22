@@ -2,11 +2,7 @@
 Echo package for BallsDex.
 
 Commands:
-  /admin <name> — send, edit, delete or reply to messages as the bot (admin only)
-
-Channel parameter accepts a channel ID or mention string so cross-server
-channels work. Discord's native TextChannel type only resolves within the
-current guild, so we handle resolution manually via bot.get_channel().
+  /admin <name> — send, edit, delete, DM or reply to messages as the bot (admin only)
 """
 
 from __future__ import annotations
@@ -82,11 +78,12 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
     @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
     @app_commands.describe(
         message="The text content to send or use when editing",
-        image="An image to attach",
+        image="An image to attach (only used when sending, not editing)",
         embed="Wrap the message text in an embed",
         channel="Channel ID or <#mention> to send to — works cross-server (default: current channel)",
-        edit_message="Message link to edit instead of sending a new message",
+        dm="User ID to send the message to via DM (ignores channel parameter)",
         reply="Message link to reply to when sending",
+        edit_message="Message link to edit instead of sending a new message",
         delete_message="Message link of the bot message to delete",
     )
     async def echo(
@@ -95,8 +92,9 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
         image: discord.Attachment | None = None,
         embed: bool = False,
         channel: str | None = None,
-        edit_message: str | None = None,
+        dm: discord.User | None = None,
         reply: str | None = None,
+        edit_message: str | None = None,
         delete_message: str | None = None,
     ):
         if not message and not image and not edit_message and not delete_message:
@@ -115,13 +113,11 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
             if err:
                 await interaction.followup.send(err, ephemeral=True)
                 return
-
             if del_msg.author.id != bot.user.id:  # type: ignore
                 await interaction.followup.send(
                     "I can only delete my own messages.", ephemeral=True
                 )
                 return
-
             try:
                 jump_url = del_msg.jump_url
                 preview = (del_msg.content or "[no text content]")[:200]
@@ -139,6 +135,98 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
                 )
             except Exception as e:
                 await interaction.followup.send(f"Error:\n```py\n{e}\n```", ephemeral=True)
+            return
+
+        # ── DM mode ───────────────────────────────────────────────────────────
+        if dm:
+            user = dm
+
+            kwargs: dict = {}
+
+            if embed:
+                kwargs["embed"] = discord.Embed(
+                    description=message or ""
+                )
+
+            elif message:
+                kwargs["content"] = message
+
+            if image:
+                kwargs["files"] = [
+                    await image.to_file()
+                ]
+
+            try:
+                sent_msg = await user.send(
+                    **kwargs
+                )
+
+                await interaction.followup.send(
+                    f"DM sent to **{user}**!",
+                    ephemeral=True,
+                )
+
+                parts = [
+                    (
+                        f"{interaction.user.name} "
+                        f"sent a DM to "
+                        f"{user} ({user.id})."
+                    ),
+                    (
+                        f"Message: {message!r}"
+                        if message
+                        else "Message: [image only]"
+                    ),
+                ]
+
+                if image:
+                    parts.append(
+                        f"Image: "
+                        f"{image.filename} "
+                        f"{image.url}"
+                    )
+
+                if embed:
+                    parts.append("Embed: True")
+
+                await log_action(
+                    " | ".join(parts),
+                    bot,
+                )
+
+            except (
+                discord.Forbidden,
+                discord.HTTPException,
+            ) as e:
+                if (
+                    isinstance(
+                        e,
+                        discord.HTTPException,
+                    )
+                    and e.code == 50007
+                ):
+                    await interaction.followup.send(
+                        (
+                            f"Could not DM "
+                            f"**{user}** — "
+                            f"they may have "
+                            f"DMs disabled."
+                        ),
+                        ephemeral=True,
+                    )
+
+                else:
+                    await interaction.followup.send(
+                        f"Error:\n```py\n{e}\n```",
+                        ephemeral=True,
+                    )
+
+            except Exception as e:
+                await interaction.followup.send(
+                    f"Error:\n```py\n{e}\n```",
+                    ephemeral=True,
+                )
+
             return
 
         # ── Resolve channel ───────────────────────────────────────────────────
@@ -162,18 +250,15 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
                     ephemeral=True,
                 )
                 return
-
             edit_msg, err = await _fetch_message(bot, edit_message)
             if err:
                 await interaction.followup.send(err, ephemeral=True)
                 return
-
             if edit_msg.author.id != bot.user.id:  # type: ignore
                 await interaction.followup.send(
                     "I can only edit my own messages.", ephemeral=True
                 )
                 return
-
             try:
                 prev_content = (edit_msg.content or "[no text content]")[:200]
                 if embed:
@@ -183,9 +268,7 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
                     )
                 else:
                     await edit_msg.edit(content=message, embed=None)
-
                 await interaction.followup.send("Message edited!", ephemeral=True)
-
                 parts = [
                     f"{interaction.user.name} edited a message in "
                     f"#{edit_msg.channel} {edit_msg.jump_url}",  # type: ignore
@@ -195,7 +278,6 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
                     parts.append("Embed: True")
                 parts.append(f"Previous message: {prev_content!r}")
                 await log_action(" | ".join(parts), bot)
-
             except discord.Forbidden:
                 await interaction.followup.send(
                     "Missing permissions to edit that message.", ephemeral=True
@@ -217,10 +299,8 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
             kwargs["embed"] = discord.Embed(description=message or "")
         elif message:
             kwargs["content"] = message
-
         if image:
             kwargs["files"] = [await image.to_file()]
-
         if reply_msg:
             kwargs["reference"] = reply_msg
             kwargs["mention_author"] = False
@@ -228,7 +308,6 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
         try:
             sent_msg = await target.send(**kwargs)
             await interaction.followup.send("Message sent!", ephemeral=True)
-
             parts = [
                 f"{interaction.user.name} sent a message in "
                 f"#{target} {sent_msg.jump_url}",
@@ -241,7 +320,6 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
             if reply_msg:
                 parts.append(f"Replied to: {reply_msg.jump_url}")
             await log_action(" | ".join(parts), bot)
-
         except discord.Forbidden:
             await interaction.followup.send(
                 f"Missing permissions to send in {target.mention}.", ephemeral=True
@@ -251,3 +329,4 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
 
     echo._is_echo = True  # type: ignore
     return echo
+    
