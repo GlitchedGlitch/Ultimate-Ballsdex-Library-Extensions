@@ -1,44 +1,46 @@
 from typing import TYPE_CHECKING
-from .cog import CollectorAdminGroup, CollectorCog
+
+from .cog import CollectorAdminCog, CollectorCog
 
 if TYPE_CHECKING:
     from ballsdex.core.bot import BallsDexBot
 
 
 async def setup(bot: "BallsDexBot"):
-    import discord
     import logging
-    from ballsdex.settings import settings
 
     log = logging.getLogger("ballsdex.packages.collector")
 
-    admin_cog = bot.get_cog("Admin")
+    # ── Player commands (/collector claim, /collector list) ───────────────────
+    await bot.add_cog(CollectorCog(bot))
+    log.info("CollectorCog loaded")
+
+    admin_cog = bot.get_cog("admin")
+    if admin_cog is None:
+        # Fallback: try title-case (depending on the core version)
+        admin_cog = bot.get_cog("Admin")
+
     if admin_cog and admin_cog.__cog_app_commands_group__:
         group = admin_cog.__cog_app_commands_group__
 
-        # On reload the subcommand is already registered — remove it first
-        if group.get_command("collector") is not None:
+        # Remove stale registration on hot-reload
+        existing = group.get_command("collector")
+        if existing is not None:
             group.remove_command("collector")
-            log.info("Removed existing /admin collector before re-adding")
+            log.debug("Removed stale /admin collector subgroup before re-adding")
 
-        group.add_command(CollectorAdminGroup(bot))
-        log.info("Attached /admin collector to Admin cog group")
+        # CollectorAdminCog is a GroupCog; its __cog_app_commands_group__ is
+        # the app_commands.Group we want nested under /admin.
+        await bot.add_cog(CollectorAdminCog(bot))
+        admin_sub = bot.get_cog("collector")  # GroupCog name = "collector"
+        if admin_sub and admin_sub.__cog_app_commands_group__:
+            group.add_command(admin_sub.__cog_app_commands_group__)
+            log.info("Attached /admin collector subgroup to Admin cog")
+        else:
+            log.warning("Could not find CollectorAdminCog's app commands group")
     else:
         log.warning(
             "Could not find Admin cog or its command group. "
             "/admin collector commands will NOT be registered. "
-            "Ensure ballsdex.packages.admin is loaded before "
-            "ballsdex.packages.collector in config.yml."
+            "Ensure the admin package is loaded before collector in config/extra.toml."
         )
-
-    await bot.add_cog(CollectorCog(bot))
-
-    # Sync global tree and each admin guild so /admin collector appears immediately
-    # without needing a manual sync or bot restart
-    try:
-        await bot.tree.sync()
-        for guild_id in settings.admin_guild_ids:
-            await bot.tree.sync(guild=discord.Object(id=guild_id))
-        log.info("Command tree synced after collector setup")
-    except Exception:
-        log.warning("Failed to sync command tree after collector setup", exc_info=True)
