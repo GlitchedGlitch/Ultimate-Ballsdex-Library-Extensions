@@ -1,18 +1,12 @@
 """
-Collector package for BallsDex (v2.30 compatible).
+Collector package for BallsDex v3
 
 Commands:
-  /collector claim  — claim a collector ball if requirements are met
-  /collector list   — paginated list of active requirements
-  /admin collector set    — set a requirement (admin only)
-  /admin collector delete — delete a requirement (admin only)
-  /admin collector view   — inspect a requirement (admin only)
-
-Requirements persist on the bot object across cog reloads and are saved to
-/code/ballsdex/packages/collector/requirements.txt so they survive updates.
-
-Admin actions are logged via ballsdex.core.utils.logging.log_action,
-which uses the log-channel set in config.yml automatically.
+  collector claim  — claim a collector ball if requirements are met
+  collector list   — paginated list of active requirements
+  admin collector set    — set a requirement and reward (Django permission required)
+  admin collector delete — remove a requirement (Django permission required)
+  admin collector view   — inspect a requirement (Django permission required)
 """
 
 from __future__ import annotations
@@ -26,9 +20,15 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from ballsdex.core.models import BallInstance, Player, Special
+from bd_models.models import BallInstance, Player, Special
 from ballsdex.core.utils.logging import log_action
-from ballsdex.core.utils.paginator import FieldPageSource, Pages
+from ballsdex.core.utils.menus import (
+    ChunkedListSource,
+    ItemFormatter,
+    Menu,
+    dynamic_chunks,
+    iter_to_async,
+)
 from ballsdex.core.utils.transformers import BallTransform, SpecialTransform
 from ballsdex.settings import settings
 
@@ -37,7 +37,6 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("ballsdex.packages.collector")
 
-GROUPS_PER_PAGE = 7
 REQUIREMENTS_FILE = "/code/ballsdex/packages/collector/requirements.txt"
 
 
@@ -75,34 +74,46 @@ def _ball_emoji(bot: "BallsDexBot", ball_id: int) -> str:
     return "•"
 
 
-# ── /admin collector — standalone Group (NOT inside CollectorCog) ─────────────
-# Defined as a plain app_commands.Group so __init__.py can attach it directly
-# to the existing /admin group without triggering CommandAlreadyRegistered.
+# ── Permission check ──────────────────────────────────────────────────────────
+# v3 uses Django permissions; the built-in helper below mirrors what core admin
+# commands do — require the Discord user to have the "admin" Django permission.
 
-class CollectorAdminGroup(app_commands.Group):
-    """Manage collector requirements"""
+def _is_admin():
+    """Decorator that checks Django-based admin permission (v3 style)."""
+    async def predicate(ctx: commands.Context) -> bool:
+        # BallsDexBot exposes is_admin() or similar; fall back to guild-owner check.
+        if hasattr(ctx.bot, "is_admin"):
+            return await ctx.bot.is_admin(ctx.author)
+        # Fallback: guild owner always passes
+        if ctx.guild and ctx.guild.owner_id == ctx.author.id:
+            return True
+        raise commands.CheckFailure(
+            "You do not have the required permissions to use this command."
+        )
+    return commands.check(predicate)
+
+
+# ── /admin collector — GroupCog attached to the admin group ───────────────────
+
+class CollectorAdminCog(commands.GroupCog, name="collector"):
+    """Admin subgroup: manage collector requirements."""
 
     def __init__(self, bot: "BallsDexBot"):
-        super().__init__(
-            name="collector",
-            description="Manage collector requirements",
-            # Setting manage_guild hides it from regular users by default.
-            # Discord server settings can then grant visibility to specific roles.
-            # The has_any_role check below enforces the actual access control.
-            default_permissions=discord.Permissions(manage_guild=True),
-        )
         self.bot = bot
+        super().__init__()
 
-    @app_commands.command(name="set", description="Set or update a collector requirement")
-    @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
+    # ── set ───────────────────────────────────────────────────────────────────
+
+    @commands.hybrid_command(name="set", description="Set or update a collector requirement")
     @app_commands.describe(
         countryball="The ball to set a requirement for",
         amount="Minimum number the player must own",
         special="The special reward the player receives",
     )
+    @_is_admin()
     async def collector_set(
         self,
-        interaction: discord.Interaction["BallsDexBot"],
+        ctx: commands.Context["BallsDexBot"],
         countryball: BallTransform,
         amount: app_commands.Range[int, 1, 9999],
         special: SpecialTransform,
@@ -118,30 +129,32 @@ class CollectorAdminGroup(app_commands.Group):
         self.bot.collector_claimed.pop(ball.pk, None)
         _save_requirements(self.bot.collector_requirements)
 
-        await interaction.response.send_message(
+        await ctx.send(
             f"Collector requirement set: **{ball.country}** — "
             f"own ≥ **{amount}** → reward **{special.name}**.\n"
             f"Previous claims for this ball have been reset.",
             ephemeral=True,
         )
         await log_action(
-            f"{interaction.user.name} set collector requirement for "
+            f"{ctx.author.name} set collector requirement for "
             f"{ball.country}. "
             f"(Minimum={amount} Special={special.name})",
-            interaction.client,
+            ctx.bot,
         )
 
-    @app_commands.command(name="delete", description="Delete a collector requirement")
-    @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
+    # ── delete ────────────────────────────────────────────────────────────────
+
+    @commands.hybrid_command(name="delete", description="Delete a collector requirement")
     @app_commands.describe(countryball="The ball whose requirement you want to remove")
+    @_is_admin()
     async def collector_delete(
         self,
-        interaction: discord.Interaction["BallsDexBot"],
+        ctx: commands.Context["BallsDexBot"],
         countryball: BallTransform,
     ):
         ball = countryball
         if ball.pk not in self.bot.collector_requirements:
-            await interaction.response.send_message(
+            await ctx.send(
                 f"No collector requirement exists for **{ball.country}**.", ephemeral=True
             )
             return
@@ -150,34 +163,35 @@ class CollectorAdminGroup(app_commands.Group):
         self.bot.collector_claimed.pop(ball.pk, None)
         _save_requirements(self.bot.collector_requirements)
 
-        await interaction.response.send_message(
+        await ctx.send(
             f"Collector requirement for **{ball.country}** has been deleted.",
             ephemeral=True,
         )
         await log_action(
-            f"{interaction.user.name} deleted collector requirement for "
-            f"{ball.country}.",
-            interaction.client,
+            f"{ctx.author.name} deleted collector requirement for {ball.country}.",
+            ctx.bot,
         )
 
-    @app_commands.command(name="view", description="View a specific collector requirement")
-    @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
+    # ── view ──────────────────────────────────────────────────────────────────
+
+    @commands.hybrid_command(name="view", description="View a specific collector requirement")
     @app_commands.describe(countryball="The ball to inspect")
+    @_is_admin()
     async def collector_view(
         self,
-        interaction: discord.Interaction["BallsDexBot"],
+        ctx: commands.Context["BallsDexBot"],
         countryball: BallTransform,
     ):
         ball = countryball
         if ball.pk not in self.bot.collector_requirements:
-            await interaction.response.send_message(
+            await ctx.send(
                 f"No collector requirement exists for **{ball.country}**.", ephemeral=True
             )
             return
 
         req = self.bot.collector_requirements[ball.pk]
         claimed_count = len(self.bot.collector_claimed.get(ball.pk, set()))
-        await interaction.response.send_message(
+        await ctx.send(
             f"**Collector Requirement — {ball.country}**\n"
             f"• Minimum: **{req['amount']}**\n"
             f"• Reward: **{req['special_name']}** (ID `{req['special_id']}`)\n"
@@ -187,10 +201,8 @@ class CollectorAdminGroup(app_commands.Group):
 
 
 # ── Player-facing cog ─────────────────────────────────────────────────────────
-# NOTE: no admin_group or admin_collector_group defined here.
-# Those are handled by CollectorAdminGroup above, attached in __init__.py.
 
-class CollectorCog(commands.Cog):
+class CollectorCog(commands.GroupCog, name="collector"):
     """Collector package — player commands."""
 
     def __init__(self, bot: "BallsDexBot"):
@@ -199,133 +211,153 @@ class CollectorCog(commands.Cog):
             bot.collector_requirements: dict[int, dict] = _load_requirements()
         if not hasattr(bot, "collector_claimed"):
             bot.collector_claimed: dict[int, set[int]] = {}
+        super().__init__()
 
-    collector_group = app_commands.Group(
-        name="collector",
-        description="Collector commands",
-    )
+    # ── claim ─────────────────────────────────────────────────────────────────
 
-    # ── /collector claim ──────────────────────────────────────────────────────
-
-    @collector_group.command(name="claim", description="Claim your collector ball reward")
+    @commands.hybrid_command(name="claim", description="Claim your collector ball reward")
     @app_commands.describe(countryball="The ball you want to claim a collector version of")
     async def collector_claim(
         self,
-        interaction: discord.Interaction["BallsDexBot"],
+        ctx: commands.Context["BallsDexBot"],
         countryball: BallTransform,
     ):
-        await interaction.response.defer(ephemeral=True)
-
         ball = countryball
         ball_id = ball.pk
         requirements = self.bot.collector_requirements
         claimed = self.bot.collector_claimed
 
         if ball_id not in requirements:
-            await interaction.followup.send(
+            await ctx.send(
                 f"There is no collector requirement set for **{ball.country}**.",
                 ephemeral=True,
             )
             return
 
         req = requirements[ball_id]
-        player, _ = await Player.get_or_create(discord_id=interaction.user.id)
+        player, _ = await Player.objects.aget_or_create(discord_id=ctx.author.id)
 
-        if interaction.user.id in claimed.get(ball_id, set()):
-            await interaction.followup.send(
+        if ctx.author.id in claimed.get(ball_id, set()):
+            await ctx.send(
                 f"You have already claimed your collector **{ball.country}**!",
                 ephemeral=True,
             )
             return
 
-        count = await BallInstance.filter(player=player, ball=ball, deleted=False).count()
+        count = await BallInstance.objects.filter(
+            player=player, ball=ball, deleted=False
+        ).acount()
         required = req["amount"]
         if count < required:
-            await interaction.followup.send(
+            await ctx.send(
                 f"You need at least **{required}** {ball.country} "
                 f"but you only have **{count}**.",
                 ephemeral=True,
             )
             return
 
-        special = await Special.get_or_none(pk=req["special_id"])
+        special = await Special.objects.filter(pk=req["special_id"]).afirst()
         if special is None:
-            await interaction.followup.send(
+            await ctx.send(
                 "The collector reward special no longer exists. Contact an admin.",
                 ephemeral=True,
             )
-            log.error("Collector special ID %d for %s not found.", req["special_id"], ball.country)
+            log.error(
+                "Collector special ID %d for %s not found.", req["special_id"], ball.country
+            )
             return
 
-        new_instance = await BallInstance.create(
+        new_instance = await BallInstance.objects.acreate(
             player=player,
             ball=ball,
             special=special,
             attack_bonus=0,
             health_bonus=0,
-            server_id=interaction.guild_id,
+            server_id=ctx.guild.id if ctx.guild else None,
         )
-        claimed.setdefault(ball_id, set()).add(interaction.user.id)
+        claimed.setdefault(ball_id, set()).add(ctx.author.id)
 
         log.info(
             "User %s (%d) claimed collector %s / special %s (#%X)",
-            interaction.user, interaction.user.id, ball.country, special.name, new_instance.pk,
+            ctx.author,
+            ctx.author.id,
+            ball.country,
+            special.name,
+            new_instance.pk,
         )
         await log_action(
-            f"{interaction.user.name} claimed {ball.country} "
+            f"{ctx.author.name} claimed {ball.country} "
             f"`(#{new_instance.pk:0X})`. "
             f"(Special={special.name} "
             f"ATK={new_instance.attack_bonus:+d} "
             f"HP={new_instance.health_bonus:+d})",
-            interaction.client,
+            ctx.bot,
         )
 
         emoji_str = special.emoji or ""
-        await interaction.followup.send(
+        await ctx.send(
             f"Congratulations! You claimed your **{emoji_str} {special.name} {ball.country}** "
             f"collector {settings.collectible_name}!\n"
             f"Added to your collection as `#{new_instance.pk:0X}`.",
             ephemeral=True,
         )
 
-    # ── /collector list ───────────────────────────────────────────────────────
+    # ── list ──────────────────────────────────────────────────────────────────
 
-    @collector_group.command(name="list", description="List all active collector requirements")
+    @commands.hybrid_command(name="list", description="List all active collector requirements")
     @app_commands.describe(reverse="Reverse the output of the list")
     async def collector_list(
         self,
-        interaction: discord.Interaction["BallsDexBot"],
+        ctx: commands.Context["BallsDexBot"],
         reverse: bool = False,
     ):
-        await interaction.response.defer(ephemeral=True)
-
         requirements = self.bot.collector_requirements
         if not requirements:
-            await interaction.followup.send(
+            await ctx.send(
                 "There are no collector requirements set up yet.", ephemeral=True
             )
             return
 
-        sorted_reqs = sorted(requirements.values(), key=lambda r: r["amount"], reverse=reverse)
+        sorted_reqs = sorted(
+            requirements.values(), key=lambda r: r["amount"], reverse=reverse
+        )
+        # Group by minimum amount
         grouped: dict[int, list[dict]] = {}
         for req in sorted_reqs:
             grouped.setdefault(req["amount"], []).append(req)
-        sorted_amounts = list(grouped.keys())
 
-        entries: list[tuple[str, str]] = []
-        for amount in sorted_amounts:
-            reqs = grouped[amount]
-            lines = [
-                f"* {_ball_emoji(self.bot, r['ball_id'])} {r['ball_name']} → *{r['special_name']}*"
-                for r in reqs
-            ]
-            entries.append((f"Minimum: {amount}", "\n".join(lines)))
+        # Build one TextDisplay per amount-group for the v3 paginator
+        async def _generate_items():
+            for amount, reqs in grouped.items():
+                lines = "\n".join(
+                    f"* {_ball_emoji(self.bot, r['ball_id'])} "
+                    f"{r['ball_name']} → *{r['special_name']}*"
+                    for r in reqs
+                )
+                yield discord.ui.TextDisplay(f"**Minimum: {amount}**\n{lines}")
+                yield discord.ui.Separator()
 
-        total_pages = -(-len(entries) // GROUPS_PER_PAGE)
-        
-        source = FieldPageSource(entries, per_page=GROUPS_PER_PAGE, inline=False)
-        source.embed.title = "Collector List"
-        source.embed.color = discord.Color.gold()
+        view = discord.ui.LayoutView()
+        container = discord.ui.Container()
 
-        pages = Pages(source, interaction=interaction)
-        await pages.start(ephemeral=True)
+        # Title section
+        container.add_item(
+            discord.ui.Section(
+                discord.ui.TextDisplay("# Collector List"),
+            )
+        )
+        container.add_item(discord.ui.Separator())
+
+        view.add_item(container)
+
+        chunks = await dynamic_chunks(view, _generate_items())
+        if not chunks:
+            await ctx.send("There are no collector requirements set up yet.", ephemeral=True)
+            return
+
+        source = ChunkedListSource(chunks, per_page=1)  # each chunk is already a page
+        formatter = ItemFormatter(container, position=2)  # insert after header + separator
+        menu = Menu(ctx.bot, view, source, formatter)
+        await menu.init(container=container)
+
+        await ctx.send(view=view, ephemeral=True)
