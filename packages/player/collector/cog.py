@@ -1,5 +1,5 @@
 """
-Collector package for BallsDex (v2.30 compatible).
+Collector package for BallsDex
 
 Commands:
   /collector claim  — claim a collector ball if requirements are met
