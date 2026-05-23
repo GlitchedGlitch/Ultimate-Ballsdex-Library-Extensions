@@ -1,19 +1,40 @@
+"""
+Collector Package Installer — BallsDex v3 compatible
+"""
+
 import base64, io, json, os, requests, traceback, discord
 from discord.ui import View, Button
 
 REPO = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
-BASE = "https://api.github.com/repos/{}/contents/packages/player/collector/{}".format(REPO, "{}")
-PKG = "/code/ballsdex/packages/collector"
-CONFIG = "/code/config.yml"
+BASE = (
+    "https://api.github.com/repos/{}/contents/packages/player/collector/{}".format(
+        REPO, "{}"
+    )
+)
+
+# v3 packages live under extra/<repo>/<app>/  — adjust to your layout if needed
+PKG = "/code/extra/collector_pkg/collector"
+# v3 uses config/extra.toml instead of config.yml
+EXTRA_TOML = "/code/config/extra.toml"
+
 REQUIREMENTS_FILE = os.path.join(PKG, "requirements.txt")
-PACKAGE_ENTRY = "  - ballsdex.packages.collector"
+
+# The entry that must appear in extra.toml to enable this package
+TOML_ENTRY = """
+[[ballsdex.packages]]
+location = "/code/extra/collector_pkg"
+path = "collector"
+enabled = true
+"""
+TOML_MARKER = 'path = "collector"'
+
 FILES = ("__init__.py", "cog.py")
 FOOTER = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
 FOOTER_TIMEOUT = FOOTER + " • Timed out"
 
 BAR_FILLED = "█"
-BAR_EMPTY  = "░"
-BAR_LEN    = 10
+BAR_EMPTY = "░"
+BAR_LEN = 10
 
 
 def _bar(current: int, total: int) -> str:
@@ -47,6 +68,7 @@ def download_files():
         resp = requests.get(BASE.format(f))
         resp.raise_for_status()
         content = base64.b64decode(resp.json()["content"]).decode()
+        os.makedirs(PKG, exist_ok=True)
         with open(os.path.join(PKG, f), "w") as fh:
             fh.write(content)
 
@@ -57,31 +79,41 @@ def ensure_requirements_file():
             f.write("{}")
 
 
-def add_to_config():
-    with open(CONFIG, "r") as f:
-        lines = f.readlines()
-    if any(PACKAGE_ENTRY.strip() in l for l in lines):
+def add_to_extra_toml():
+    """Append the package block to config/extra.toml if not already present."""
+    if os.path.isfile(EXTRA_TOML):
+        with open(EXTRA_TOML, "r") as f:
+            contents = f.read()
+        if TOML_MARKER in contents:
+            return  # already registered
+        with open(EXTRA_TOML, "a") as f:
+            f.write(TOML_ENTRY)
+    else:
+        # Create the file from scratch
+        os.makedirs(os.path.dirname(EXTRA_TOML), exist_ok=True)
+        with open(EXTRA_TOML, "w") as f:
+            f.write(TOML_ENTRY.lstrip())
+
+
+def remove_from_extra_toml():
+    """Remove the collector block from config/extra.toml."""
+    if not os.path.isfile(EXTRA_TOML):
         return
-    for i, line in enumerate(lines):
-        if "ballsdex.packages.trade" in line:
-            lines.insert(i + 1, PACKAGE_ENTRY + "\n")
-            break
-    with open(CONFIG, "w") as f:
-        f.writelines(lines)
-
-
-def remove_from_config():
-    with open(CONFIG, "r") as f:
-        lines = f.readlines()
-    lines = [l for l in lines if "ballsdex.packages.collector" not in l]
-    with open(CONFIG, "w") as f:
-        f.writelines(lines)
+    with open(EXTRA_TOML, "r") as f:
+        contents = f.read()
+    # Remove the block — crude but effective for a simple installer
+    import re
+    pattern = r"\n?\[\[ballsdex\.packages\]\][^\[]*path\s*=\s*\"collector\"[^\[]*"
+    cleaned = re.sub(pattern, "", contents, flags=re.DOTALL)
+    with open(EXTRA_TOML, "w") as f:
+        f.write(cleaned)
 
 
 def delete_files():
     import shutil
-    if os.path.isdir(PKG):
-        shutil.rmtree(PKG)
+    parent = os.path.dirname(PKG)  # /code/extra/collector_pkg
+    if os.path.isdir(parent):
+        shutil.rmtree(parent)
 
 
 def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
@@ -90,11 +122,11 @@ def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
         description=(
             "Adds a collector system to your BallsDex instance.\n\n"
             "**Commands**\n"
-            "• `/collector claim` — claim a collector ball\n"
-            "• `/collector list` — view all active requirements\n"
-            "• `/admin collector set` — set a requirement and reward\n"
-            "• `/admin collector delete` — remove a requirement\n"
-            "• `/admin collector view` — inspect a requirement\n\n"
+            "• `collector claim` — claim a collector ball\n"
+            "• `collector list` — view all active requirements\n"
+            "• `admin collector set` — set a requirement and reward\n"
+            "• `admin collector delete` — remove a requirement\n"
+            "• `admin collector view` — inspect a requirement\n\n"
             "**How it works**\n"
             "Admins configure a minimum ball count and a special reward. "
             "Players who own enough copies of that ball can claim a collector "
@@ -115,7 +147,7 @@ def build_confirm_embed() -> discord.Embed:
             "This will:\n"
             "• Unload the package from the bot\n"
             "• Delete all package files\n"
-            "• Remove it from `config.yml`\n"
+            "• Remove it from `config/extra.toml`\n"
             "• Wipe all active collector requirements\n\n"
             "This action **cannot be undone** without reinstalling."
         ),
@@ -146,6 +178,10 @@ def build_result_embed(title: str, description: str, color: discord.Color) -> di
     return embed
 
 
+# ── Extension name used by discord.py load/unload/reload ─────────────────────
+EXT_NAME = "collector"  # v3: matches the `path` field in extra.toml
+
+
 class ConfirmDeleteView(View):
     def __init__(self, parent: "CollectorInstallerView"):
         super().__init__(timeout=60)
@@ -171,25 +207,29 @@ class ConfirmDeleteView(View):
         DELETE_STEPS = [
             "Unloading extension",
             "Deleting package files",
-            "Removing from config.yml",
+            "Removing from config/extra.toml",
         ]
         steps = [(s, None) for s in DELETE_STEPS]
 
         async def update(i: int, success: bool = True):
             steps[i] = (steps[i][0], success)
             await self.parent.message.edit(
-                embed=_progress_embed("🗑️ Deleting Collector Package…", steps, discord.Color.red()),
+                embed=_progress_embed(
+                    "🗑️ Deleting Collector Package…", steps, discord.Color.red()
+                ),
                 view=None,
             )
 
         await self.parent.message.edit(
-            embed=_progress_embed("🗑️ Deleting Collector Package…", steps, discord.Color.red()),
+            embed=_progress_embed(
+                "🗑️ Deleting Collector Package…", steps, discord.Color.red()
+            ),
             view=None,
         )
 
         try:
             try:
-                await self.parent.bot.unload_extension("ballsdex.packages.collector")
+                await self.parent.bot.unload_extension(EXT_NAME)
             except Exception:
                 pass
             await update(0)
@@ -201,7 +241,7 @@ class ConfirmDeleteView(View):
                 del self.parent.bot.collector_claimed
             await update(1)
 
-            remove_from_config()
+            remove_from_extra_toml()
             await update(2)
 
             self.parent.installed = False
@@ -213,7 +253,7 @@ class ConfirmDeleteView(View):
                     (
                         "The **Collector Package** has been removed.\n\n"
                         "• All package files deleted\n"
-                        "• Removed from `config.yml`\n"
+                        "• Removed from `config/extra.toml`\n"
                         "• All requirements wiped\n\n"
                         "Restart the bot to fully apply the config change.\n\n"
                         "Run this installer again to reinstall."
@@ -284,21 +324,24 @@ class CollectorInstallerView(View):
             "Creating package folder",
             "Downloading files",
             "Creating requirements file",
-            "Adding to config.yml",
+            "Adding to config/extra.toml",
             "Loading extension",
-            "Syncing command tree",
         ]
         steps = [(s, None) for s in INSTALL_STEPS]
 
         async def update(i: int, success: bool = True):
             steps[i] = (steps[i][0], success)
             await self.message.edit(
-                embed=_progress_embed("Installing Collector Package…", steps, discord.Color.blurple()),
+                embed=_progress_embed(
+                    "Installing Collector Package…", steps, discord.Color.blurple()
+                ),
                 view=None,
             )
 
         await self.message.edit(
-            embed=_progress_embed("Installing Collector Package…", steps, discord.Color.blurple()),
+            embed=_progress_embed(
+                "Installing Collector Package…", steps, discord.Color.blurple()
+            ),
             view=None,
         )
 
@@ -312,17 +355,11 @@ class CollectorInstallerView(View):
             ensure_requirements_file()
             await update(2)
 
-            add_to_config()
+            add_to_extra_toml()
             await update(3)
 
-            await self.bot.load_extension("ballsdex.packages.collector")
+            await self.bot.load_extension(EXT_NAME)
             await update(4)
-
-            from ballsdex.settings import settings
-            await self.bot.tree.sync()
-            for guild_id in settings.admin_guild_ids:
-                await self.bot.tree.sync(guild=discord.Object(id=guild_id))
-            await update(5)
 
             self.done = True
             self.stop()
@@ -331,8 +368,8 @@ class CollectorInstallerView(View):
                     "Successfully Installed",
                     (
                         "The **Collector Package** has been installed and loaded.\n\n"
-                        "You can now use `/collector claim`, `/collector list` "
-                        "and the `/admin collector` commands.\n\n"
+                        "You can now use `collector claim`, `collector list` "
+                        "and the `admin collector` commands.\n\n"
                         "Run this installer again to update or remove the package."
                     ),
                     discord.Color.green(),
@@ -358,19 +395,22 @@ class CollectorInstallerView(View):
         UPDATE_STEPS = [
             "Downloading latest files",
             "Reloading extension",
-            "Syncing command tree",
         ]
         steps = [(s, None) for s in UPDATE_STEPS]
 
         async def update(i: int, success: bool = True):
             steps[i] = (steps[i][0], success)
             await self.message.edit(
-                embed=_progress_embed("Updating Collector Package…", steps, discord.Color.blurple()),
+                embed=_progress_embed(
+                    "Updating Collector Package…", steps, discord.Color.blurple()
+                ),
                 view=None,
             )
 
         await self.message.edit(
-            embed=_progress_embed("Updating Collector Package…", steps, discord.Color.blurple()),
+            embed=_progress_embed(
+                "Updating Collector Package…", steps, discord.Color.blurple()
+            ),
             view=None,
         )
 
@@ -378,18 +418,11 @@ class CollectorInstallerView(View):
             download_files()
             await update(0)
 
-            loaded = "ballsdex.packages.collector" in self.bot.extensions
-            if loaded:
-                await self.bot.reload_extension("ballsdex.packages.collector")
+            if EXT_NAME in self.bot.extensions:
+                await self.bot.reload_extension(EXT_NAME)
             else:
-                await self.bot.load_extension("ballsdex.packages.collector")
+                await self.bot.load_extension(EXT_NAME)
             await update(1)
-
-            from ballsdex.settings import settings
-            await self.bot.tree.sync()
-            for guild_id in settings.admin_guild_ids:
-                await self.bot.tree.sync(guild=discord.Object(id=guild_id))
-            await update(2)
 
             self.done = True
             self.stop()
@@ -422,6 +455,8 @@ class CollectorInstallerView(View):
         await interaction.response.defer()
         await self.message.edit(embed=build_confirm_embed(), view=ConfirmDeleteView(self))
 
+
+# ── Entry point ───────────────────────────────────────────────────────────────
 
 installed = is_installed()
 view = CollectorInstallerView(bot, ctx, installed)
