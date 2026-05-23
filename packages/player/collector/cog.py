@@ -21,8 +21,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from bd_models.models import BallInstance, Player, Special
-from ballsdex.core.utils.logging import log_action
-from ballsdex.settings import settings
+from settings.models import settings
 
 if TYPE_CHECKING:
     from ballsdex.core.bot import BallsDexBot
