@@ -2,13 +2,7 @@
 Collector Package Installer — BallsDex v3
 
 V3 packages are pip-installed via git+https in config/extra.toml and require
-a `docker compose build` to take effect. This installer:
-
-  Install — writes the [[ballsdex.packages]] entry to config/extra.toml
-             and prompts the user to rebuild.
-  Remove  — removes the entry from config/extra.toml
-             and prompts the user to rebuild.
-
+a `docker compose build` to take effect.
 """
 
 import io, os, re, traceback, discord
