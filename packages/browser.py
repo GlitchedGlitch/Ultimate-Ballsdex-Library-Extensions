@@ -10,7 +10,7 @@ import discord
 from discord.ui import View, Button
 
 REPO   = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
-BRANCH = "v2-main"
+BRANCH = "v3"
 API    = f"https://api.github.com/repos/{REPO}/contents/{{}}?ref={BRANCH}"
 FOOTER = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
 TIMEOUT = 300  # 5 minutes
