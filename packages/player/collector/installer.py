@@ -1,76 +1,145 @@
 """
-Collector Package Installer — BallsDex v3
+Collector Package Installer — BallsDex v3 
 
-V3 packages are pip-installed via git+https in config/extra.toml and require
-a `docker compose build` to take effect.
+Instead of writing files to disk (which fails because /code is read-only and
+/code/config is permission-denied at runtime), this installer:
+
+  1. Downloads cog.py and __init__.py from GitHub into /tmp/collector_ext/
+  2. Injects a minimal fake Django AppConfig into sys.modules so discord.py's
+     load_extension() is satisfied without a real pip-installed package
+  3. Calls bot.load_extension() on the in-memory module path
+  4. Persists requirements to /tmp/collector_requirements.json
+
+On Delete: unloads the extension and removes the injected modules.
+On Update:  re-downloads files and reloads.
+
+For a permanent install that survives restarts, add this to config/extra.toml or ask your hoster:
+
+  [[ballsdex.packages]]
+  location = "git+https://github.com/GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions.git@v3"
+  path = "collector"
+  enabled = true
+  editable = false
 """
 
-import io, os, re, traceback, discord
+import base64, importlib, importlib.util, io, os, sys, traceback, types, requests, discord
 from discord.ui import View, Button
 
-REPO_URL   = "git+https://github.com/GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions.git@v3"
-APP_PATH   = "collector"          # the `path` field in extra.toml
-EXTRA_TOML = "/code/config/extra.toml"
-TOML_MARKER = f'path = "{APP_PATH}"'
-TOML_BLOCK = (
-    "\n[[ballsdex.packages]]\n"
-    f'location = "{REPO_URL}"\n'
-    f'path = "{APP_PATH}"\n'
-    "enabled = true\n"
-    "editable = false\n"
+REPO   = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
+BRANCH = "v3"
+RAW    = "https://raw.githubusercontent.com/{}/{}//packages/player/collector/{}".format(
+    REPO, BRANCH, "{}"
 )
+API    = "https://api.github.com/repos/{}/contents/packages/player/collector/{}?ref={}".format(
+    REPO, "{}", BRANCH
+)
+
+TMP_DIR      = "/tmp/collector_ext"
+EXT_MODULE   = "collector_ext"          # name used for load_extension
+APP_MODULE   = "collector_app"          # fake Django app module name
+REQ_FILE     = "/tmp/collector_requirements.json"
 
 FOOTER         = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
 FOOTER_TIMEOUT = FOOTER + " • Timed out"
+BAR_FILLED, BAR_EMPTY, BAR_LEN = "█", "░", 10
 
 
-# ── extra.toml helpers ────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _toml_has_entry() -> bool:
-    if not os.path.isfile(EXTRA_TOML):
-        return False
-    with open(EXTRA_TOML, "r") as f:
-        return TOML_MARKER in f.read()
-
-
-def _add_to_toml():
-    os.makedirs(os.path.dirname(EXTRA_TOML), exist_ok=True)
-    if os.path.isfile(EXTRA_TOML):
-        with open(EXTRA_TOML, "r") as f:
-            contents = f.read()
-        if TOML_MARKER in contents:
-            return  # already present
-        with open(EXTRA_TOML, "a") as f:
-            f.write(TOML_BLOCK)
-    else:
-        with open(EXTRA_TOML, "w") as f:
-            f.write(TOML_BLOCK.lstrip())
+def _bar(current: int, total: int) -> str:
+    filled = round(BAR_LEN * current / total)
+    pct    = round(100 * current / total)
+    return f"`{BAR_FILLED * filled}{BAR_EMPTY * (BAR_LEN - filled)}` {pct}%"
 
 
-def _remove_from_toml():
-    if not os.path.isfile(EXTRA_TOML):
-        return
-    with open(EXTRA_TOML, "r") as f:
-        contents = f.read()
-    cleaned = re.sub(
-        r"\n?\[\[ballsdex\.packages\]\][^\[]*path\s*=\s*\"collector\"[^\[]*",
-        "",
-        contents,
-        flags=re.DOTALL,
+def _progress_embed(title: str, steps: list, color: discord.Color) -> discord.Embed:
+    done  = sum(1 for _, s in steps if s is True)
+    icons = {None: "⬜", True: "✅", False: "❌"}
+    lines = [f"{icons[s]} {label}" for label, s in steps]
+    embed = discord.Embed(
+        title=title,
+        description="\n".join(lines) + f"\n\n{_bar(done, len(steps))}",
+        color=color,
     )
-    with open(EXTRA_TOML, "w") as f:
-        f.write(cleaned)
+    embed.set_footer(text=FOOTER)
+    return embed
 
 
-def is_installed() -> bool:
-    """True if the package entry exists in extra.toml."""
-    return _toml_has_entry()
+def _fetch_file(filename: str) -> str:
+    """Fetch a file from GitHub via the API (handles LFS / large files)."""
+    resp = requests.get(API.format(filename))
+    resp.raise_for_status()
+    data = resp.json()
+    return base64.b64decode(data["content"]).decode()
+
+
+def _write_tmp(filename: str, content: str) -> str:
+    os.makedirs(TMP_DIR, exist_ok=True)
+    path = os.path.join(TMP_DIR, filename)
+    with open(path, "w") as f:
+        f.write(content)
+    return path
+
+
+def _download_files():
+    """Download cog.py and __init__.py into /tmp/collector_ext/."""
+    for fname in ("cog.py", "__init__.py"):
+        content = _fetch_file(fname)
+        _write_tmp(fname, content)
+    # Ensure the directory is a package
+    init = os.path.join(TMP_DIR, "__init__.py")
+    if not os.path.isfile(init):
+        open(init, "w").close()
+
+
+def _inject_fake_app():
+    """
+    Inject a minimal fake Django AppConfig and package module into sys.modules
+    so that discord.py's load_extension(EXT_MODULE) works without a real
+    pip-installed Django app.
+    """
+    # 1. Make /tmp visible to Python's import system
+    if "/tmp" not in sys.path:
+        sys.path.insert(0, "/tmp")
+
+    # 2. Fake top-level collector_ext package pointing at TMP_DIR
+    spec = importlib.util.spec_from_file_location(
+        EXT_MODULE,
+        os.path.join(TMP_DIR, "__init__.py"),
+        submodule_search_locations=[TMP_DIR],
+    )
+    pkg = importlib.util.module_from_spec(spec)
+    pkg.__path__ = [TMP_DIR]
+    pkg.__package__ = EXT_MODULE
+    spec.loader.exec_module(pkg)
+    sys.modules[EXT_MODULE] = pkg
+
+    # 3. Also load collector_ext.cog so the cog import works
+    cog_spec = importlib.util.spec_from_file_location(
+        f"{EXT_MODULE}.cog",
+        os.path.join(TMP_DIR, "cog.py"),
+    )
+    cog_mod = importlib.util.module_from_spec(cog_spec)
+    cog_mod.__package__ = EXT_MODULE
+    cog_spec.loader.exec_module(cog_mod)
+    sys.modules[f"{EXT_MODULE}.cog"] = cog_mod
+
+
+def _cleanup_modules():
+    """Remove injected modules from sys.modules on unload."""
+    for key in list(sys.modules):
+        if key == EXT_MODULE or key.startswith(f"{EXT_MODULE}."):
+            del sys.modules[key]
+
+
+def is_loaded(bot) -> bool:
+    return EXT_MODULE in bot.extensions
 
 
 # ── Embeds ────────────────────────────────────────────────────────────────────
 
-def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
-    status = "✅ Registered in `config/extra.toml`" if installed else "❌ Not installed"
+def build_main_embed(loaded: bool, color: discord.Color) -> discord.Embed:
+    status = "✅ Loaded (session only)" if loaded else "❌ Not loaded"
     embed = discord.Embed(
         title="Collector Package",
         description=(
@@ -86,8 +155,10 @@ def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
             "Players who own enough copies of that ball can claim a collector "
             "version with the chosen special applied.\n\n"
             f"**Status:** {status}\n\n"
-            "⚠️ **v3 note:** After installing or removing, you must run "
-            "`docker compose build && docker compose up -d` to apply changes."
+            "⚠️ **This installs for the current session only.** "
+            "The package will unload when the bot restarts. "
+            "For a permanent install, ask your hoster to add it to "
+            "`config/extra.toml` as a `git+https://` package."
         ),
         color=color,
     )
@@ -97,14 +168,11 @@ def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
 
 def build_confirm_embed() -> discord.Embed:
     embed = discord.Embed(
-        title="Remove Collector Package",
+        title="Unload Collector Package",
         description=(
-            "⚠️ **Are you sure you want to remove the Collector package?**\n\n"
-            "This will remove the entry from `config/extra.toml`.\n\n"
-            "You will need to run:\n"
-            "```\ndocker compose build\ndocker compose up -d\n```\n"
-            "to fully uninstall the package.\n\n"
-            "This does **not** delete any ball instances already created."
+            "⚠️ **Are you sure you want to unload the Collector package?**\n\n"
+            "This will unload the commands for this session.\n"
+            "No ball instances will be deleted."
         ),
         color=discord.Color.orange(),
     )
@@ -133,18 +201,18 @@ def build_result_embed(title: str, description: str, color: discord.Color) -> di
     return embed
 
 
-# ── Confirm remove view ───────────────────────────────────────────────────────
+# ── Confirm unload view ───────────────────────────────────────────────────────
 
-class ConfirmRemoveView(View):
+class ConfirmUnloadView(View):
     def __init__(self, parent: "CollectorInstallerView"):
         super().__init__(timeout=60)
         self.parent = parent
 
     async def on_timeout(self):
         if not self.parent.done:
-            color = discord.Color.gold() if self.parent.installed else discord.Color.greyple()
+            color = discord.Color.gold() if self.parent.loaded else discord.Color.greyple()
             await self.parent.message.edit(
-                embed=build_main_embed(self.parent.installed, color), view=self.parent
+                embed=build_main_embed(self.parent.loaded, color), view=self.parent
             )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -153,22 +221,24 @@ class ConfirmRemoveView(View):
             return False
         return True
 
-    @discord.ui.button(label="Yes, remove it", style=discord.ButtonStyle.danger, emoji="🗑️")
+    @discord.ui.button(label="Yes, unload it", style=discord.ButtonStyle.danger, emoji="🗑️")
     async def confirm_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
         try:
-            _remove_from_toml()
-            self.parent.installed = False
+            await self.parent.bot.unload_extension(EXT_MODULE)
+            _cleanup_modules()
+            for attr in ("collector_requirements", "collector_claimed"):
+                if hasattr(self.parent.bot, attr):
+                    delattr(self.parent.bot, attr)
+            self.parent.loaded = False
             self.parent.done = True
             self.stop()
             await self.parent.message.edit(
                 embed=build_result_embed(
-                    "Entry Removed",
+                    "Unloaded",
                     (
-                        "The **Collector Package** entry has been removed from "
-                        "`config/extra.toml`.\n\n"
-                        "Run the following to fully uninstall:\n"
-                        "```\ndocker compose build\ndocker compose up -d\n```"
+                        "The **Collector Package** has been unloaded for this session.\n\n"
+                        "Run the installer again to reload it."
                     ),
                     discord.Color.red(),
                 ),
@@ -178,38 +248,38 @@ class ConfirmRemoveView(View):
             err = traceback.format_exc()
             self.parent.done = True
             self.stop()
-            await self.parent.message.edit(embed=build_error_embed("removing", err), view=None)
+            await self.parent.message.edit(embed=build_error_embed("unloading", err), view=None)
             await interaction.followup.send(
-                file=discord.File(io.BytesIO(err.encode()), filename="remove_error.txt")
+                file=discord.File(io.BytesIO(err.encode()), filename="unload_error.txt")
             )
 
     @discord.ui.button(label="No, go back", style=discord.ButtonStyle.secondary, emoji="↩️")
     async def cancel_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
-        color = discord.Color.gold() if self.parent.installed else discord.Color.greyple()
+        color = discord.Color.gold() if self.parent.loaded else discord.Color.greyple()
         await self.parent.message.edit(
-            embed=build_main_embed(self.parent.installed, color), view=self.parent
+            embed=build_main_embed(self.parent.loaded, color), view=self.parent
         )
 
 
 # ── Main installer view ───────────────────────────────────────────────────────
 
 class CollectorInstallerView(View):
-    def __init__(self, bot, ctx, installed: bool):
+    def __init__(self, bot, ctx, loaded: bool):
         super().__init__(timeout=180)
-        self.bot = bot
-        self.ctx = ctx
-        self.installed = installed
-        self.done = False
+        self.bot    = bot
+        self.ctx    = ctx
+        self.loaded = loaded
+        self.done   = False
         self.message = None
         self._update_buttons()
 
     def _update_buttons(self):
         for c in self.children:
-            if c.label == "Install":
-                c.disabled = self.installed
-            elif c.label == "Remove":
-                c.disabled = not self.installed
+            if c.label == "Load":
+                c.disabled = self.loaded
+            elif c.label in ("Update", "Unload"):
+                c.disabled = not self.loaded
 
     async def on_timeout(self):
         if self.done:
@@ -217,7 +287,7 @@ class CollectorInstallerView(View):
         for c in self.children:
             c.disabled = True
         if self.message:
-            embed = build_main_embed(self.installed, discord.Color.dark_grey())
+            embed = build_main_embed(self.loaded, discord.Color.dark_grey())
             embed.set_footer(text=FOOTER_TIMEOUT)
             await self.message.edit(embed=embed, view=self)
 
@@ -227,25 +297,56 @@ class CollectorInstallerView(View):
             return False
         return True
 
-    @discord.ui.button(label="Install", style=discord.ButtonStyle.success, emoji="📥")
-    async def install_button(self, interaction: discord.Interaction, button: Button):
+    @discord.ui.button(label="Load", style=discord.ButtonStyle.success, emoji="📥")
+    async def load_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
+
+        steps = [
+            ("Downloading files to /tmp", None),
+            ("Injecting module into Python", None),
+            ("Loading extension", None),
+        ]
+
+        async def update(i: int, success: bool = True):
+            steps[i] = (steps[i][0], success)
+            await self.message.edit(
+                embed=_progress_embed("Loading Collector Package…", steps, discord.Color.blurple()),
+                view=None,
+            )
+
+        await self.message.edit(
+            embed=_progress_embed("Loading Collector Package…", steps, discord.Color.blurple()),
+            view=None,
+        )
+
         try:
-            _add_to_toml()
-            self.installed = True
+            _download_files()
+            await update(0)
+
+            _inject_fake_app()
+            await update(1)
+
+            await self.bot.load_extension(EXT_MODULE)
+            await update(2)
+
+            self.loaded = True
             self._update_buttons()
             self.done = True
             self.stop()
             await self.message.edit(
                 embed=build_result_embed(
-                    "Entry Added — Rebuild Required",
+                    "Loaded Successfully",
                     (
-                        "The **Collector Package** has been added to "
-                        "`config/extra.toml`.\n\n"
-                        "To finish installation, run:\n"
-                        "```\ndocker compose build\ndocker compose up -d\n```\n"
-                        "After the rebuild, `collector` will appear in the "
-                        "packages loaded log and all commands will be available."
+                        "The **Collector Package** is loaded for this session.\n\n"
+                        "You can now use `collector claim`, `collector list` "
+                        "and the `admin collector` commands.\n\n"
+                        "⚠️ This will unload when the bot restarts. "
+                        "For a permanent install, ask your hoster to add:\n"
+                        "```toml\n[[ballsdex.packages]]\n"
+                        "location = \"git+https://github.com/GlitchedGlitch/"
+                        "Ultimate-Ballsdex-Library-Extensions.git@v3\"\n"
+                        "path = \"collector\"\nenabled = true\neditable = false\n```\n"
+                        "to `config/extra.toml` and rebuild."
                     ),
                     discord.Color.green(),
                 ),
@@ -255,21 +356,84 @@ class CollectorInstallerView(View):
             err = traceback.format_exc()
             self.done = True
             self.stop()
-            await self.message.edit(embed=build_error_embed("installing", err), view=None)
+            for i, (label, state) in enumerate(steps):
+                if state is None:
+                    steps[i] = (label, False)
+                    break
+            await self.message.edit(embed=build_error_embed("loading", err), view=None)
             await interaction.followup.send(
-                file=discord.File(io.BytesIO(err.encode()), filename="install_error.txt")
+                file=discord.File(io.BytesIO(err.encode()), filename="load_error.txt")
             )
 
-    @discord.ui.button(label="Remove", style=discord.ButtonStyle.danger, emoji="🗑️")
-    async def remove_button(self, interaction: discord.Interaction, button: Button):
+    @discord.ui.button(label="Update", style=discord.ButtonStyle.primary, emoji="🔄")
+    async def update_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
-        await self.message.edit(embed=build_confirm_embed(), view=ConfirmRemoveView(self))
+
+        steps = [
+            ("Downloading latest files", None),
+            ("Reloading extension", None),
+        ]
+
+        async def update(i: int, success: bool = True):
+            steps[i] = (steps[i][0], success)
+            await self.message.edit(
+                embed=_progress_embed("Updating Collector Package…", steps, discord.Color.blurple()),
+                view=None,
+            )
+
+        await self.message.edit(
+            embed=_progress_embed("Updating Collector Package…", steps, discord.Color.blurple()),
+            view=None,
+        )
+
+        try:
+            _download_files()
+            _cleanup_modules()
+            _inject_fake_app()
+            await update(0)
+
+            if EXT_MODULE in self.bot.extensions:
+                await self.bot.reload_extension(EXT_MODULE)
+            else:
+                await self.bot.load_extension(EXT_MODULE)
+            await update(1)
+
+            self.done = True
+            self.stop()
+            await self.message.edit(
+                embed=build_result_embed(
+                    "Updated Successfully",
+                    (
+                        "The **Collector Package** has been updated and reloaded.\n\n"
+                        "All commands are now running the latest version."
+                    ),
+                    discord.Color.blue(),
+                ),
+                view=None,
+            )
+        except Exception:
+            err = traceback.format_exc()
+            self.done = True
+            self.stop()
+            for i, (label, state) in enumerate(steps):
+                if state is None:
+                    steps[i] = (label, False)
+                    break
+            await self.message.edit(embed=build_error_embed("updating", err), view=None)
+            await interaction.followup.send(
+                file=discord.File(io.BytesIO(err.encode()), filename="update_error.txt")
+            )
+
+    @discord.ui.button(label="Unload", style=discord.ButtonStyle.danger, emoji="🗑️")
+    async def unload_button(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        await self.message.edit(embed=build_confirm_embed(), view=ConfirmUnloadView(self))
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-installed = is_installed()
-view = CollectorInstallerView(bot, ctx, installed)
-initial_color = discord.Color.gold() if installed else discord.Color.greyple()
-message = await ctx.send(embed=build_main_embed(installed, initial_color), view=view)
+loaded = is_loaded(bot)
+view   = CollectorInstallerView(bot, ctx, loaded)
+color  = discord.Color.gold() if loaded else discord.Color.greyple()
+message = await ctx.send(embed=build_main_embed(loaded, color), view=view)
 view.message = message
