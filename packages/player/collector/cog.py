@@ -5,14 +5,9 @@ Commands:
   /collector claim  — claim a collector ball if requirements are met
   /collector list   — paginated list of active requirements
   /admin collector set    — set a requirement (admin only)
+  /admin collector bulk   — set multiple requirements at once (admin only)
   /admin collector delete — delete a requirement (admin only)
   /admin collector view   — inspect a requirement (admin only)
-
-Requirements persist on the bot object across cog reloads and are saved to
-/code/ballsdex/packages/collector/requirements.txt so they survive updates.
-
-Admin actions are logged via ballsdex.core.utils.logging.log_action,
-which uses the log-channel set in config.yml automatically.
 """
 
 from __future__ import annotations
@@ -25,8 +20,10 @@ from typing import TYPE_CHECKING
 import discord
 from discord import app_commands
 from discord.ext import commands
+from discord.ui import Modal, TextInput
 
 from ballsdex.core.models import BallInstance, Player, Special
+from ballsdex.core.models import balls as balls_cache
 from ballsdex.core.utils.logging import log_action
 from ballsdex.core.utils.paginator import FieldPageSource, Pages
 from ballsdex.core.utils.transformers import BallTransform, SpecialTransform
@@ -66,7 +63,6 @@ def _load_requirements() -> dict[int, dict]:
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _ball_emoji(bot: "BallsDexBot", ball_id: int) -> str:
-    from ballsdex.core.models import balls as balls_cache
     ball = balls_cache.get(ball_id)
     if ball and ball.emoji_id:
         emoji = bot.get_emoji(ball.emoji_id)
@@ -75,9 +71,184 @@ def _ball_emoji(bot: "BallsDexBot", ball_id: int) -> str:
     return "•"
 
 
-# ── /admin collector — standalone Group (NOT inside CollectorCog) ─────────────
-# Defined as a plain app_commands.Group so __init__.py can attach it directly
-# to the existing /admin group without triggering CommandAlreadyRegistered.
+def _find_ball_by_name(name: str):
+    """Find a ball from the cache by name (case-insensitive)."""
+    name = name.strip().lower()
+    for ball in balls_cache.values():
+        if ball.country.lower() == name:
+            return ball
+    return None
+
+
+async def _find_special_by_name(name: str):
+    """Find a special by name (case-insensitive)."""
+    name = name.strip().lower()
+    special = await Special.get_or_none(name__iexact=name)
+    return special
+
+
+# ── Bulk modal ────────────────────────────────────────────────────────────────
+
+class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
+    """
+    Modal for adding multiple collector requirements at once.
+
+    Format (one per line):
+      BallName | Amount | SpecialName
+
+    Example:
+      France | 5 | Shiny
+      Germany | 10 | Gold
+      Japan | 3 | Shiny
+    """
+
+    requirements_input = TextInput(
+        label="Requirements (BallName | Amount | SpecialName)",
+        style=discord.TextStyle.paragraph,
+        placeholder=(
+            "One requirement per line:\n"
+            "France | 5 | Shiny\n"
+            "Germany | 10 | Gold\n"
+            "Japan | 3 | Shiny"
+        ),
+        required=True,
+        max_length=4000,
+    )
+
+    def __init__(self, bot: "BallsDexBot", interaction: discord.Interaction):
+        super().__init__()
+        self.bot = bot
+        self.original_interaction = interaction
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        lines = [l.strip() for l in self.requirements_input.value.splitlines() if l.strip()]
+        if not lines:
+            await interaction.followup.send("No requirements provided.", ephemeral=True)
+            return
+
+        added:   list[str] = []
+        skipped: list[str] = []
+        errors:  list[str] = []
+
+        for line in lines:
+            parts = [p.strip() for p in line.split("|")]
+            if len(parts) != 3:
+                errors.append(f"`{line}` — must be `BallName | Amount | SpecialName`")
+                continue
+
+            ball_name, amount_str, special_name = parts
+
+            # Validate amount
+            try:
+                amount = int(amount_str)
+                if not (1 <= amount <= 9999):
+                    raise ValueError
+            except ValueError:
+                errors.append(f"`{line}` — amount must be a number between 1 and 9999")
+                continue
+
+            # Find ball
+            ball = _find_ball_by_name(ball_name)
+            if ball is None:
+                errors.append(f"`{line}` — ball `{ball_name}` not found")
+                continue
+
+            # Find special
+            special = await _find_special_by_name(special_name)
+            if special is None:
+                errors.append(f"`{line}` — special `{special_name}` not found")
+                continue
+
+            # Set requirement
+            self.bot.collector_requirements[ball.pk] = {
+                "ball_id": ball.pk,
+                "ball_name": ball.country,
+                "amount": amount,
+                "special_id": special.pk,
+                "special_name": special.name,
+            }
+            self.bot.collector_claimed.pop(ball.pk, None)
+            added.append(f"**{ball.country}** — ≥{amount} → {special.name}")
+
+        if added:
+            _save_requirements(self.bot.collector_requirements)
+
+        # Build result message
+        result_lines: list[str] = []
+        if added:
+            result_lines.append(f"**Added {len(added)} requirement(s):**")
+            result_lines.extend(added)
+        if skipped:
+            result_lines.append(f"\n**Skipped {len(skipped)}:**")
+            result_lines.extend(skipped)
+        if errors:
+            result_lines.append(f"\n**Errors ({len(errors)}):**")
+            result_lines.extend(errors)
+
+        result_text = "\n".join(result_lines)
+
+        # Split if too long for one message
+        if len(result_text) > 1900:
+            result_text = result_text[:1900] + "\n... (truncated)"
+
+        await interaction.followup.send(result_text, ephemeral=True)
+
+        # Log to admin channel
+        if added:
+            await log_action(
+                f"{interaction.user.name} bulk added {len(added)} collector requirement(s). "
+                f"Errors: {len(errors)}",
+                interaction.client,
+            )
+        log.info(
+            "Bulk add by %s: %d added, %d errors",
+            interaction.user, len(added), len(errors),
+        )
+
+
+# ── Bulk confirm view ─────────────────────────────────────────────────────────
+
+class BulkConfirmView(discord.ui.View):
+    """
+    Shown before opening the bulk modal — gives the admin the format guide
+    and a button to open the input modal.
+    """
+
+    def __init__(self, bot: "BallsDexBot", interaction: discord.Interaction):
+        super().__init__(timeout=120)
+        self.bot = bot
+        self.interaction = interaction
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.interaction.user.id:
+            await interaction.response.send_message("This menu is not for you.", ephemeral=True)
+            return False
+        return True
+
+    async def on_timeout(self):
+        for c in self.children:
+            c.disabled = True
+        try:
+            await self.interaction.edit_original_response(view=self)
+        except Exception:
+            pass
+
+    @discord.ui.button(label="Open Input", style=discord.ButtonStyle.success, emoji="📝")
+    async def open_modal(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(BulkAddModal(self.bot, self.interaction))
+        self.stop()
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary, emoji="✖️")
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(
+            content="Bulk add cancelled.", embed=None, view=None
+        )
+        self.stop()
+
+
+# ── /admin collector — standalone Group ───────────────────────────────────────
 
 class CollectorAdminGroup(app_commands.Group):
     """Manage collector requirements"""
@@ -86,9 +257,6 @@ class CollectorAdminGroup(app_commands.Group):
         super().__init__(
             name="collector",
             description="Manage collector requirements",
-            # Setting manage_guild hides it from regular users by default.
-            # Discord server settings can then grant visibility to specific roles.
-            # The has_any_role check below enforces the actual access control.
             default_permissions=discord.Permissions(manage_guild=True),
         )
         self.bot = bot
@@ -126,10 +294,43 @@ class CollectorAdminGroup(app_commands.Group):
         )
         await log_action(
             f"{interaction.user.name} set collector requirement for "
-            f"{ball.country}. "
+            f"{ball.country} `({ball.pk:0X})`. "
             f"(Minimum={amount} Special={special.name})",
             interaction.client,
         )
+
+    @app_commands.command(
+        name="bulk",
+        description="Add multiple collector requirements at once",
+    )
+    @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
+    async def collector_bulk(
+        self,
+        interaction: discord.Interaction["BallsDexBot"],
+    ):
+        embed = discord.Embed(
+            title="📋 Bulk Add Collector Requirements",
+            description=(
+                "Add multiple requirements at once using the format below.\n\n"
+                "**Format** (one per line):\n"
+                "```\n"
+                "BallName | Amount | SpecialName\n"
+                "```\n"
+                "**Example:**\n"
+                "```\n"
+                "France | 5 | Shiny\n"
+                "Germany | 10 | Gold\n"
+                "Japan | 3 | Shiny\n"
+                "```\n\n"
+                "⚠️ Ball names and special names must match exactly as they appear in the bot.\n"
+                "Existing requirements for the same ball will be **overwritten**.\n"
+                "Claims for updated balls will be **reset**.\n\n"
+                "Press **Open Input** to enter your requirements."
+            ),
+            color=discord.Color.blurple(),
+        )
+        view = BulkConfirmView(self.bot, interaction)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @app_commands.command(name="delete", description="Delete a collector requirement")
     @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
@@ -151,12 +352,12 @@ class CollectorAdminGroup(app_commands.Group):
         _save_requirements(self.bot.collector_requirements)
 
         await interaction.response.send_message(
-            f"Collector requirement for **{ball.country}** has been deleted.",
+            f"🗑️ Collector requirement for **{ball.country}** has been deleted.",
             ephemeral=True,
         )
         await log_action(
             f"{interaction.user.name} deleted collector requirement for "
-            f"{ball.country}.",
+            f"{ball.country} `({ball.pk:0X})`.",
             interaction.client,
         )
 
@@ -187,8 +388,6 @@ class CollectorAdminGroup(app_commands.Group):
 
 
 # ── Player-facing cog ─────────────────────────────────────────────────────────
-# NOTE: no admin_group or admin_collector_group defined here.
-# Those are handled by CollectorAdminGroup above, attached in __init__.py.
 
 class CollectorCog(commands.Cog):
     """Collector package — player commands."""
@@ -282,7 +481,7 @@ class CollectorCog(commands.Cog):
 
         emoji_str = special.emoji or ""
         await interaction.followup.send(
-            f"Congratulations! You claimed your **{emoji_str} {special.name} {ball.country}** "
+            f"🎉 Congratulations! You claimed your **{emoji_str} {special.name} {ball.country}** "
             f"collector {settings.collectible_name}!\n"
             f"Added to your collection as `#{new_instance.pk:0X}`.",
             ephemeral=True,
@@ -291,7 +490,7 @@ class CollectorCog(commands.Cog):
     # ── /collector list ───────────────────────────────────────────────────────
 
     @collector_group.command(name="list", description="List all active collector requirements")
-    @app_commands.describe(reverse="Reverse the output of the list")
+    @app_commands.describe(reverse="Sort from highest to lowest amount (default: lowest first)")
     async def collector_list(
         self,
         interaction: discord.Interaction["BallsDexBot"],
@@ -322,10 +521,18 @@ class CollectorCog(commands.Cog):
             entries.append((f"Minimum: {amount}", "\n".join(lines)))
 
         total_pages = -(-len(entries) // GROUPS_PER_PAGE)
-        
+        sort_label = "Highest → Lowest" if reverse else "Lowest → Highest"
+
         source = FieldPageSource(entries, per_page=GROUPS_PER_PAGE, inline=False)
         source.embed.title = "Collector List"
         source.embed.color = discord.Color.gold()
+
+        if total_pages > 1:
+            source.embed.set_footer(
+                text=f"{len(requirements)} requirement(s) • Sorted: {sort_label}"
+            )
+        else:
+            source.embed.set_footer(text=f"{len(requirements)} requirement(s)")
 
         pages = Pages(source, interaction=interaction)
         await pages.start(ephemeral=True)
