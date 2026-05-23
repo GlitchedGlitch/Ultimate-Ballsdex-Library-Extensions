@@ -22,14 +22,6 @@ from discord.ext import commands
 
 from bd_models.models import BallInstance, Player, Special
 from ballsdex.core.utils.logging import log_action
-from ballsdex.core.utils.menus import (
-    ChunkedListSource,
-    ItemFormatter,
-    Menu,
-    dynamic_chunks,
-    iter_to_async,
-)
-from ballsdex.core.utils.transformers import BallTransform, SpecialTransform
 from ballsdex.settings import settings
 
 if TYPE_CHECKING:
@@ -37,7 +29,8 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("ballsdex.packages.collector")
 
-REQUIREMENTS_FILE = "/code/ballsdex/packages/collector/requirements.txt"
+# Stored alongside the Django app inside config/packages/collector_app/
+REQUIREMENTS_FILE = os.path.join(os.path.dirname(__file__), "requirements.json")
 
 
 # ── Persistence ───────────────────────────────────────────────────────────────
@@ -47,7 +40,7 @@ def _save_requirements(requirements: dict[int, dict]) -> None:
         with open(REQUIREMENTS_FILE, "w") as f:
             json.dump(requirements, f, indent=2)
     except Exception:
-        log.warning("Could not save requirements.txt", exc_info=True)
+        log.warning("Could not save requirements.json", exc_info=True)
 
 
 def _load_requirements() -> dict[int, dict]:
@@ -58,7 +51,7 @@ def _load_requirements() -> dict[int, dict]:
             raw = json.load(f)
         return {int(k): v for k, v in raw.items()}
     except Exception:
-        log.warning("Could not load requirements.txt", exc_info=True)
+        log.warning("Could not load requirements.json", exc_info=True)
         return {}
 
 
@@ -75,16 +68,11 @@ def _ball_emoji(bot: "BallsDexBot", ball_id: int) -> str:
 
 
 # ── Permission check ──────────────────────────────────────────────────────────
-# v3 uses Django permissions; the built-in helper below mirrors what core admin
-# commands do — require the Discord user to have the "admin" Django permission.
 
 def _is_admin():
-    """Decorator that checks Django-based admin permission (v3 style)."""
     async def predicate(ctx: commands.Context) -> bool:
-        # BallsDexBot exposes is_admin() or similar; fall back to guild-owner check.
         if hasattr(ctx.bot, "is_admin"):
             return await ctx.bot.is_admin(ctx.author)
-        # Fallback: guild owner always passes
         if ctx.guild and ctx.guild.owner_id == ctx.author.id:
             return True
         raise commands.CheckFailure(
@@ -93,7 +81,7 @@ def _is_admin():
     return commands.check(predicate)
 
 
-# ── /admin collector — GroupCog attached to the admin group ───────────────────
+# ── /admin collector subgroup ─────────────────────────────────────────────────
 
 class CollectorAdminCog(commands.GroupCog, name="collector"):
     """Admin subgroup: manage collector requirements."""
@@ -101,8 +89,6 @@ class CollectorAdminCog(commands.GroupCog, name="collector"):
     def __init__(self, bot: "BallsDexBot"):
         self.bot = bot
         super().__init__()
-
-    # ── set ───────────────────────────────────────────────────────────────────
 
     @commands.hybrid_command(name="set", description="Set or update a collector requirement")
     @app_commands.describe(
@@ -114,35 +100,50 @@ class CollectorAdminCog(commands.GroupCog, name="collector"):
     async def collector_set(
         self,
         ctx: commands.Context["BallsDexBot"],
-        countryball: BallTransform,
+        countryball: str,
         amount: app_commands.Range[int, 1, 9999],
-        special: SpecialTransform,
+        special: str,
     ):
-        ball = countryball
+        # Resolve ball and special by name
+        ball = None
+        async for b in __import__("bd_models.models", fromlist=["Ball"]).Ball.objects.filter(enabled=True):
+            if b.country.lower() == countryball.lower():
+                ball = b
+                break
+        if ball is None:
+            await ctx.send(f"No ball found matching `{countryball}`.", ephemeral=True)
+            return
+
+        sp = None
+        async for s in Special.objects.all():
+            if s.name.lower() == special.lower():
+                sp = s
+                break
+        if sp is None:
+            await ctx.send(f"No special found matching `{special}`.", ephemeral=True)
+            return
+
         self.bot.collector_requirements[ball.pk] = {
             "ball_id": ball.pk,
             "ball_name": ball.country,
             "amount": amount,
-            "special_id": special.pk,
-            "special_name": special.name,
+            "special_id": sp.pk,
+            "special_name": sp.name,
         }
         self.bot.collector_claimed.pop(ball.pk, None)
         _save_requirements(self.bot.collector_requirements)
 
         await ctx.send(
             f"Collector requirement set: **{ball.country}** — "
-            f"own ≥ **{amount}** → reward **{special.name}**.\n"
+            f"own ≥ **{amount}** → reward **{sp.name}**.\n"
             f"Previous claims for this ball have been reset.",
             ephemeral=True,
         )
         await log_action(
             f"{ctx.author.name} set collector requirement for "
-            f"{ball.country}. "
-            f"(Minimum={amount} Special={special.name})",
+            f"{ball.country}. (Minimum={amount} Special={sp.name})",
             ctx.bot,
         )
-
-    # ── delete ────────────────────────────────────────────────────────────────
 
     @commands.hybrid_command(name="delete", description="Delete a collector requirement")
     @app_commands.describe(countryball="The ball whose requirement you want to remove")
@@ -150,29 +151,32 @@ class CollectorAdminCog(commands.GroupCog, name="collector"):
     async def collector_delete(
         self,
         ctx: commands.Context["BallsDexBot"],
-        countryball: BallTransform,
+        countryball: str,
     ):
-        ball = countryball
-        if ball.pk not in self.bot.collector_requirements:
+        match = next(
+            (v for v in self.bot.collector_requirements.values()
+             if v["ball_name"].lower() == countryball.lower()),
+            None,
+        )
+        if match is None:
             await ctx.send(
-                f"No collector requirement exists for **{ball.country}**.", ephemeral=True
+                f"No collector requirement exists for **{countryball}**.", ephemeral=True
             )
             return
 
-        del self.bot.collector_requirements[ball.pk]
-        self.bot.collector_claimed.pop(ball.pk, None)
+        ball_pk = match["ball_id"]
+        del self.bot.collector_requirements[ball_pk]
+        self.bot.collector_claimed.pop(ball_pk, None)
         _save_requirements(self.bot.collector_requirements)
 
         await ctx.send(
-            f"Collector requirement for **{ball.country}** has been deleted.",
+            f"Collector requirement for **{match['ball_name']}** has been deleted.",
             ephemeral=True,
         )
         await log_action(
-            f"{ctx.author.name} deleted collector requirement for {ball.country}.",
+            f"{ctx.author.name} deleted collector requirement for {match['ball_name']}.",
             ctx.bot,
         )
-
-    # ── view ──────────────────────────────────────────────────────────────────
 
     @commands.hybrid_command(name="view", description="View a specific collector requirement")
     @app_commands.describe(countryball="The ball to inspect")
@@ -180,21 +184,25 @@ class CollectorAdminCog(commands.GroupCog, name="collector"):
     async def collector_view(
         self,
         ctx: commands.Context["BallsDexBot"],
-        countryball: BallTransform,
+        countryball: str,
     ):
-        ball = countryball
-        if ball.pk not in self.bot.collector_requirements:
+        match = next(
+            (v for v in self.bot.collector_requirements.values()
+             if v["ball_name"].lower() == countryball.lower()),
+            None,
+        )
+        if match is None:
             await ctx.send(
-                f"No collector requirement exists for **{ball.country}**.", ephemeral=True
+                f"No collector requirement exists for **{countryball}**.", ephemeral=True
             )
             return
 
-        req = self.bot.collector_requirements[ball.pk]
-        claimed_count = len(self.bot.collector_claimed.get(ball.pk, set()))
+        ball_pk = match["ball_id"]
+        claimed_count = len(self.bot.collector_claimed.get(ball_pk, set()))
         await ctx.send(
-            f"**Collector Requirement — {ball.country}**\n"
-            f"• Minimum: **{req['amount']}**\n"
-            f"• Reward: **{req['special_name']}** (ID `{req['special_id']}`)\n"
+            f"**Collector Requirement — {match['ball_name']}**\n"
+            f"• Minimum: **{match['amount']}**\n"
+            f"• Reward: **{match['special_name']}** (ID `{match['special_id']}`)\n"
             f"• Claims this session: **{claimed_count}**",
             ephemeral=True,
         )
@@ -213,20 +221,30 @@ class CollectorCog(commands.GroupCog, name="collector"):
             bot.collector_claimed: dict[int, set[int]] = {}
         super().__init__()
 
-    # ── claim ─────────────────────────────────────────────────────────────────
-
     @commands.hybrid_command(name="claim", description="Claim your collector ball reward")
     @app_commands.describe(countryball="The ball you want to claim a collector version of")
     async def collector_claim(
         self,
         ctx: commands.Context["BallsDexBot"],
-        countryball: BallTransform,
+        countryball: str,
     ):
-        ball = countryball
-        ball_id = ball.pk
         requirements = self.bot.collector_requirements
         claimed = self.bot.collector_claimed
 
+        # Resolve ball by name
+        from bd_models.models import Ball
+        ball = None
+        async for b in Ball.objects.filter(enabled=True):
+            if b.country.lower() == countryball.lower():
+                ball = b
+                break
+        if ball is None:
+            await ctx.send(
+                f"No ball found matching `{countryball}`.", ephemeral=True
+            )
+            return
+
+        ball_id = ball.pk
         if ball_id not in requirements:
             await ctx.send(
                 f"There is no collector requirement set for **{ball.country}**.",
@@ -279,15 +297,10 @@ class CollectorCog(commands.GroupCog, name="collector"):
 
         log.info(
             "User %s (%d) claimed collector %s / special %s (#%X)",
-            ctx.author,
-            ctx.author.id,
-            ball.country,
-            special.name,
-            new_instance.pk,
+            ctx.author, ctx.author.id, ball.country, special.name, new_instance.pk,
         )
         await log_action(
-            f"{ctx.author.name} claimed {ball.country} "
-            f"`(#{new_instance.pk:0X})`. "
+            f"{ctx.author.name} claimed {ball.country} `(#{new_instance.pk:0X})`. "
             f"(Special={special.name} "
             f"ATK={new_instance.attack_bonus:+d} "
             f"HP={new_instance.health_bonus:+d})",
@@ -301,8 +314,6 @@ class CollectorCog(commands.GroupCog, name="collector"):
             f"Added to your collection as `#{new_instance.pk:0X}`.",
             ephemeral=True,
         )
-
-    # ── list ──────────────────────────────────────────────────────────────────
 
     @commands.hybrid_command(name="list", description="List all active collector requirements")
     @app_commands.describe(reverse="Reverse the output of the list")
@@ -321,43 +332,39 @@ class CollectorCog(commands.GroupCog, name="collector"):
         sorted_reqs = sorted(
             requirements.values(), key=lambda r: r["amount"], reverse=reverse
         )
-        # Group by minimum amount
         grouped: dict[int, list[dict]] = {}
         for req in sorted_reqs:
             grouped.setdefault(req["amount"], []).append(req)
 
-        # Build one TextDisplay per amount-group for the v3 paginator
-        async def _generate_items():
-            for amount, reqs in grouped.items():
-                lines = "\n".join(
-                    f"* {_ball_emoji(self.bot, r['ball_id'])} "
-                    f"{r['ball_name']} → *{r['special_name']}*"
-                    for r in reqs
-                )
-                yield discord.ui.TextDisplay(f"**Minimum: {amount}**\n{lines}")
-                yield discord.ui.Separator()
+        lines = []
+        for amount, reqs in grouped.items():
+            lines.append(f"**Minimum: {amount}**")
+            for r in reqs:
+                emoji = _ball_emoji(self.bot, r["ball_id"])
+                lines.append(f"* {emoji} {r['ball_name']} → *{r['special_name']}*")
+            lines.append("")
 
-        view = discord.ui.LayoutView()
-        container = discord.ui.Container()
+        # Simple paginated output — split into 1800-char chunks to stay within limits
+        pages = []
+        current = []
+        current_len = 0
+        for line in lines:
+            if current_len + len(line) + 1 > 1800 and current:
+                pages.append("\n".join(current))
+                current = []
+                current_len = 0
+            current.append(line)
+            current_len += len(line) + 1
+        if current:
+            pages.append("\n".join(current))
 
-        # Title section
-        container.add_item(
-            discord.ui.Section(
-                discord.ui.TextDisplay("# Collector List"),
+        total = len(pages)
+        for i, page in enumerate(pages, 1):
+            embed = discord.Embed(
+                title="Collector List" if i == 1 else f"Collector List (cont.)",
+                description=page,
+                color=discord.Color.gold(),
             )
-        )
-        container.add_item(discord.ui.Separator())
-
-        view.add_item(container)
-
-        chunks = await dynamic_chunks(view, _generate_items())
-        if not chunks:
-            await ctx.send("There are no collector requirements set up yet.", ephemeral=True)
-            return
-
-        source = ChunkedListSource(chunks, per_page=1)  # each chunk is already a page
-        formatter = ItemFormatter(container, position=2)  # insert after header + separator
-        menu = Menu(ctx.bot, view, source, formatter)
-        await menu.init(container=container)
-
-        await ctx.send(view=view, ephemeral=True)
+            if total > 1:
+                embed.set_footer(text=f"Page {i}/{total}")
+            await ctx.send(embed=embed, ephemeral=True)
