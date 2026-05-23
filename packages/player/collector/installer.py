@@ -1,5 +1,5 @@
 """
-Collector Package Installer — BallsDex v3 
+Collector Package Installer — BallsDex v3
 
 Instead of writing files to disk (which fails because /code is read-only and
 /code/config is permission-denied at runtime), this installer:
@@ -9,11 +9,14 @@ Instead of writing files to disk (which fails because /code is read-only and
      load_extension() is satisfied without a real pip-installed package
   3. Calls bot.load_extension() on the in-memory module path
   4. Persists requirements to /tmp/collector_requirements.json
+     (survives the session; lost on container restart — acceptable for a
+      no-console install; console users should use the proper pip method)
 
 On Delete: unloads the extension and removes the injected modules.
 On Update:  re-downloads files and reloads.
 
-For a permanent install that survives restarts, add this to config/extra.toml or ask your hoster:
+For a permanent install that survives restarts, add this to config/extra.toml
+or ask your hoster:
 
   [[ballsdex.packages]]
   location = "git+https://github.com/GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions.git@v3"
@@ -94,35 +97,51 @@ def _download_files():
 
 def _inject_fake_app():
     """
-    Inject a minimal fake Django AppConfig and package module into sys.modules
-    so that discord.py's load_extension(EXT_MODULE) works without a real
-    pip-installed Django app.
-    """
-    # 1. Make /tmp visible to Python's import system
-    if "/tmp" not in sys.path:
-        sys.path.insert(0, "/tmp")
+    Load collector_ext from /tmp into sys.modules so that
+    bot.load_extension("collector_ext") works without a pip-installed package.
 
-    # 2. Fake top-level collector_ext package pointing at TMP_DIR
-    spec = importlib.util.spec_from_file_location(
+    Order matters:
+      1. Ensure /tmp and /code are on sys.path so both the package root and
+         ballsdex.* imports resolve correctly.
+      2. Register empty stub modules for collector_ext AND collector_ext.cog
+         BEFORE executing any source, so that the relative import
+         `from .cog import ...` inside __init__.py finds a module object
+         already in sys.modules instead of triggering a fresh import cycle.
+      3. Execute cog.py first (it has no relative imports of its own).
+      4. Execute __init__.py last (its `from .cog import ...` now resolves
+         against the already-populated collector_ext.cog stub).
+    """
+    # 1. Path setup
+    for p in ("/tmp", "/code"):
+        if p not in sys.path:
+            sys.path.insert(0, p)
+
+    # 2. Build specs without executing yet
+    pkg_spec = importlib.util.spec_from_file_location(
         EXT_MODULE,
         os.path.join(TMP_DIR, "__init__.py"),
         submodule_search_locations=[TMP_DIR],
     )
-    pkg = importlib.util.module_from_spec(spec)
-    pkg.__path__ = [TMP_DIR]
-    pkg.__package__ = EXT_MODULE
-    spec.loader.exec_module(pkg)
-    sys.modules[EXT_MODULE] = pkg
-
-    # 3. Also load collector_ext.cog so the cog import works
     cog_spec = importlib.util.spec_from_file_location(
         f"{EXT_MODULE}.cog",
         os.path.join(TMP_DIR, "cog.py"),
     )
+
+    # Create bare module objects and register them immediately
+    pkg_mod = importlib.util.module_from_spec(pkg_spec)
+    pkg_mod.__path__    = [TMP_DIR]
+    pkg_mod.__package__ = EXT_MODULE
+    sys.modules[EXT_MODULE] = pkg_mod
+
     cog_mod = importlib.util.module_from_spec(cog_spec)
     cog_mod.__package__ = EXT_MODULE
-    cog_spec.loader.exec_module(cog_mod)
     sys.modules[f"{EXT_MODULE}.cog"] = cog_mod
+
+    # 3. Execute cog.py first — no relative imports, safe to run standalone
+    cog_spec.loader.exec_module(cog_mod)
+
+    # 4. Execute __init__.py — `from .cog import ...` now hits the cached stub
+    pkg_spec.loader.exec_module(pkg_mod)
 
 
 def _cleanup_modules():
