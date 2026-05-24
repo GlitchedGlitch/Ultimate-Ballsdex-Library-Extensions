@@ -96,7 +96,7 @@ def delete_files():
 
 def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
     embed = discord.Embed(
-        title="🚪 Leave Server Package",
+        title="Leave Server Package",
         description=(
             "Adds a command to make the bot leave a server by its ID.\n\n"
             "**Commands**\n"
@@ -113,7 +113,7 @@ def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
 
 def build_confirm_embed() -> discord.Embed:
     embed = discord.Embed(
-        title="🗑️ Delete Leave Server Package",
+        title="Delete Leave Server Package",
         description=(
             "⚠️ **Are you sure you want to delete the Leave Server package?**\n\n"
             "This will unload the package, delete all files and remove it from `config.yml`."
@@ -127,7 +127,7 @@ def build_confirm_embed() -> discord.Embed:
 def build_error_embed(action: str, error: str) -> discord.Embed:
     short = error[:1000] + "..." if len(error) > 1000 else error
     embed = discord.Embed(
-        title="❌ An error occurred",
+        title="An error occurred",
         description=(
             f"An error occurred when **{action}** the package!\n\n"
             f"```\n{short}\n```\n\n"
@@ -179,12 +179,12 @@ class ConfirmDeleteView(View):
         async def update(i: int, success: bool = True):
             steps[i] = (steps[i][0], success)
             await self.parent.message.edit(
-                embed=_progress_embed("🗑️ Deleting Leave Server Package…", steps, discord.Color.red()),
+                embed=_progress_embed("Deleting Leave Server Package…", steps, discord.Color.red()),
                 view=None,
             )
 
         await self.parent.message.edit(
-            embed=_progress_embed("🗑️ Deleting Leave Server Package…", steps, discord.Color.red()),
+            embed=_progress_embed("Deleting Leave Server Package…", steps, discord.Color.red()),
             view=None,
         )
 
@@ -212,7 +212,7 @@ class ConfirmDeleteView(View):
             self.stop()
             await self.parent.message.edit(
                 embed=build_result_embed(
-                    "🗑️ Successfully Deleted",
+                    "Successfully Deleted",
                     (
                         "The **Leave Server Package** has been removed.\n\n"
                         "• Command removed from Discord\n"
@@ -293,12 +293,12 @@ class LeaveServerInstallerView(View):
         async def update(i: int, success: bool = True):
             steps[i] = (steps[i][0], success)
             await self.message.edit(
-                embed=_progress_embed("📥 Installing Leave Server Package…", steps, discord.Color.blurple()),
+                embed=_progress_embed("Installing Leave Server Package…", steps, discord.Color.blurple()),
                 view=None,
             )
 
         await self.message.edit(
-            embed=_progress_embed("📥 Installing Leave Server Package…", steps, discord.Color.blurple()),
+            embed=_progress_embed("Installing Leave Server Package…", steps, discord.Color.blurple()),
             view=None,
         )
 
@@ -322,7 +322,7 @@ class LeaveServerInstallerView(View):
             self.stop()
             await self.message.edit(
                 embed=build_result_embed(
-                    "✅ Successfully Installed",
+                    "Successfully Installed",
                     (
                         "The **Leave Server Package** has been installed.\n\n"
                         "You can now use `/admin leave_server`.\n\n"
@@ -358,12 +358,12 @@ class LeaveServerInstallerView(View):
         async def update(i: int, success: bool = True):
             steps[i] = (steps[i][0], success)
             await self.message.edit(
-                embed=_progress_embed("🔄 Updating Leave Server Package…", steps, discord.Color.blurple()),
+                embed=_progress_embed("Updating Leave Server Package…", steps, discord.Color.blurple()),
                 view=None,
             )
 
         await self.message.edit(
-            embed=_progress_embed("🔄 Updating Leave Server Package…", steps, discord.Color.blurple()),
+            embed=_progress_embed("Updating Leave Server Package…", steps, discord.Color.blurple()),
             view=None,
         )
 
@@ -385,7 +385,7 @@ class LeaveServerInstallerView(View):
             self.stop()
             await self.message.edit(
                 embed=build_result_embed(
-                    "🔄 Successfully Updated",
+                    "Successfully Updated",
                     (
                         "The **Leave Server Package** has been updated and reloaded.\n\n"
                         "Run this installer again to update or remove the package."
