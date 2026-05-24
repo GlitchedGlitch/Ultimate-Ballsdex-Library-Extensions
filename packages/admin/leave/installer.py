@@ -2,7 +2,7 @@ import asyncio, base64, io, os, requests, traceback, discord
 from discord.ui import View, Button
 
 REPO   = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
-BASE   = "https://api.github.com/repos/{}/contents/packages/admin/leaveserver/{}".format(REPO, "{}")
+BASE   = "https://api.github.com/repos/{}/contents/packages/admin/leave/{}".format(REPO, "{}")
 PKG    = "/code/ballsdex/packages/leaveserver"
 CONFIG = "/code/config.yml"
 PACKAGE_ENTRY = "  - ballsdex.packages.leaveserver"
