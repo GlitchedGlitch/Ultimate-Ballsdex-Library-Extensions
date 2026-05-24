@@ -146,7 +146,7 @@ def build_result_embed(title: str, description: str, color: discord.Color) -> di
 
 
 class ConfirmDeleteView(View):
-    def __init__(self, parent: "LeaveServerInstallerView"):
+    def __init__(self, parent: "LeaveInstallerView"):
         super().__init__(timeout=60)
         self.parent = parent
 
@@ -193,7 +193,7 @@ class ConfirmDeleteView(View):
             await update(0)
 
             try:
-                await self.parent.bot.unload_extension("ballsdex.packages.leaveserver")
+                await self.parent.bot.unload_extension("ballsdex.packages.leave")
             except Exception:
                 pass
             await update(1)
@@ -244,7 +244,7 @@ class ConfirmDeleteView(View):
         )
 
 
-class LeaveServerInstallerView(View):
+class LeaveInstallerView(View):
     def __init__(self, bot, ctx, installed: bool):
         super().__init__(timeout=180)
         self.bot       = bot
@@ -312,7 +312,7 @@ class LeaveServerInstallerView(View):
             add_to_config()
             await update(2)
 
-            await self.bot.load_extension("ballsdex.packages.leaveserver")
+            await self.bot.load_extension("ballsdex.packages.leave")
             await update(3)
 
             await _sync_tree(self.bot)
@@ -371,11 +371,11 @@ class LeaveServerInstallerView(View):
             download_files()
             await update(0)
 
-            loaded = "ballsdex.packages.leaveserver" in self.bot.extensions
+            loaded = "ballsdex.packages.leave" in self.bot.extensions
             if loaded:
-                await self.bot.reload_extension("ballsdex.packages.leaveserver")
+                await self.bot.reload_extension("ballsdex.packages.leave")
             else:
-                await self.bot.load_extension("ballsdex.packages.leaveserver")
+                await self.bot.load_extension("ballsdex.packages.leave")
             await update(1)
 
             await _sync_tree(self.bot)
@@ -413,7 +413,7 @@ class LeaveServerInstallerView(View):
 
 
 installed = is_installed()
-view = LeaveServerInstallerView(bot, ctx, installed)
+view = LeaveInstallerView(bot, ctx, installed)
 initial_color = discord.Color.gold() if installed else discord.Color.greyple()
 message = await ctx.send(embed=build_main_embed(installed, initial_color), view=view)
 view.message = message
