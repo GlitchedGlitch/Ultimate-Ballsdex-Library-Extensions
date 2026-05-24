@@ -13,15 +13,15 @@ from ballsdex.settings import settings
 if TYPE_CHECKING:
     from ballsdex.core.bot import BallsDexBot
 
-log = logging.getLogger("ballsdex.packages.leaveserver")
+log = logging.getLogger("ballsdex.packages.leave")
 
 
-class LeaveServerCog(commands.Cog):
+class LeaveCog(commands.Cog):
     def __init__(self, bot: "BallsDexBot"):
         self.bot = bot
 
 
-def LeaveServerCommand(bot: "BallsDexBot") -> app_commands.Command:
+def LeaveCommand(bot: "BallsDexBot") -> app_commands.Command:
     @app_commands.command(
         name="leave_server",
         description="Make the bot leave a server by its ID",
