@@ -7,6 +7,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from ballsdex.core.utils.logging import log_action
 from ballsdex.settings import settings
 
 if TYPE_CHECKING:
@@ -56,6 +57,11 @@ def LeaveServerCommand(bot: "BallsDexBot") -> app_commands.Command:
         log.info(
             "Admin %s (%d) made the bot leave guild %s (%d)",
             interaction.user, interaction.user.id, guild_name, guild_id,
+        )
+        await log_action(
+            f"{interaction.user.name} used leave_server — "
+            f"left {guild_name} ({guild_id})",
+            interaction.client,
         )
 
         await interaction.followup.send(
