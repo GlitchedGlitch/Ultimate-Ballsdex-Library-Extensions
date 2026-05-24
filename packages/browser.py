@@ -1,6 +1,5 @@
 """
 Package Browser for Ultimate BallsDex Library Extensions :D
-Fetches structure live from GitHub
 
 """
 
@@ -13,7 +12,7 @@ REPO   = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
 BRANCH = "v2-main"
 API    = f"https://api.github.com/repos/{REPO}/contents/{{}}?ref={BRANCH}"
 FOOTER = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
-TIMEOUT = 300  # 5 minutes
+TIMEOUT = 300
 
 
 # ── GitHub helpers ────────────────────────────────────────────────────────────
@@ -93,7 +92,7 @@ def timeout_embed(embed: discord.Embed) -> discord.Embed:
 def inject_back_button(view: View, browser: "BrowserView", category: str) -> View:
     """
     Add a Back button to any View that navigates back to the category page.
-    Works with any installer view regardless of its custom buttons.
+    Also unlocks the browser so its timeout resumes guarding the message.
     """
     back_btn = Button(
         label="Back to list",
@@ -104,6 +103,7 @@ def inject_back_button(view: View, browser: "BrowserView", category: str) -> Vie
 
     async def back_callback(interaction: discord.Interaction):
         await interaction.response.defer()
+        browser.locked = False  # unlock: browser timeout can act on message again
         await browser.show_category(category)
 
     back_btn.callback = back_callback
@@ -120,9 +120,12 @@ async def run_package_installer(
 ):
     """
     Fetch and execute the package's own installer.py.
-    The installer sends its own embed+view message.
-    We then inject a Back button into whatever view it created.
+    Locks the browser while the installer is active so the browser's
+    on_timeout cannot overwrite the installer embed.
     """
+    # Lock the browser — timeout will no longer touch the message
+    browser.locked = True
+
     try:
         code = gh_file(f"packages/{category}/{pkg}/installer.py")
     except Exception:
@@ -134,13 +137,11 @@ async def run_package_installer(
             color=discord.Color.red(),
         )
         embed.set_footer(text=FOOTER)
-        await browser.message.edit(embed=embed, view=None)
+        err_view = View(timeout=None)  # no timeout on error views
+        inject_back_button(err_view, browser, category)
+        await browser.message.edit(embed=embed, view=err_view)
         await browser.ctx.send(file=f)
         return
-
-    # We intercept ctx.send so the installer message goes to the existing
-    # browser message instead of creating a new one, then we inject Back.
-    intercepted_view: list[View] = []
 
     class InterceptCtx:
         """Wraps ctx so installer's `await ctx.send(...)` edits the browser message."""
@@ -151,28 +152,19 @@ async def run_package_installer(
             embed = kwargs.get("embed")
 
             if view is not None:
-                # Inject Back button before displaying
                 inject_back_button(view, browser, category)
-                # Wire view.message to browser.message so installer internals work
-                intercepted_view.append(view)
+                # Disable the view's own timeout — the Back button is how
+                # the user exits, we don't want the installer view timing out
+                # and reverting to its own idle state on the shared message.
+                view.timeout = None
 
-            await browser.message.edit(
-                embed=embed,
-                view=view,
-            )
-
-            # Return a proxy so installer can do `view.message = message`
+            await browser.message.edit(embed=embed, view=view)
             return browser.message
 
     fake_ctx = InterceptCtx()
 
-    # Build the installer's globals: bot, ctx point to our intercept
-    globs = {
-        "bot": browser.bot,
-        "ctx": fake_ctx,
-    }
+    globs = {"bot": browser.bot, "ctx": fake_ctx}
 
-    # Wrap the installer in an async function so top-level awaits work
     lines = ["async def __installer(bot, ctx):"]
     for line in code.splitlines():
         lines.append("    " + line)
@@ -190,8 +182,7 @@ async def run_package_installer(
             color=discord.Color.red(),
         )
         embed.set_footer(text=FOOTER)
-        # Add a back button even on error
-        err_view = View(timeout=TIMEOUT)
+        err_view = View(timeout=None)
         inject_back_button(err_view, browser, category)
         await browser.message.edit(embed=embed, view=err_view)
         await browser.ctx.send(file=f)
@@ -235,6 +226,9 @@ class CategoryView(View):
         return True
 
     async def on_timeout(self):
+        # Don't touch the message if the browser is locked by an installer
+        if self.browser.locked:
+            return
         for c in self.children:
             c.disabled = True
         try:
@@ -256,6 +250,9 @@ class BrowserView(View):
         self.owner_id   = ctx.author.id
         self.categories = categories
         self.message    = None
+        # locked = True while an installer is running on the shared message.
+        # Prevents on_timeout from overwriting installer embeds.
+        self.locked     = False
         self._build()
 
     def _build(self):
@@ -292,6 +289,9 @@ class BrowserView(View):
         return True
 
     async def on_timeout(self):
+        # Don't touch the message while an installer is active
+        if self.locked:
+            return
         for c in self.children:
             c.disabled = True
         try:
@@ -303,10 +303,12 @@ class BrowserView(View):
             pass
 
     async def show_root(self):
+        self.locked = False
         self._build()
         await self.message.edit(embed=root_embed(self.categories), view=self)
 
     async def show_category(self, category: str):
+        self.locked = False
         try:
             packages = get_packages(category)
         except Exception as e:
