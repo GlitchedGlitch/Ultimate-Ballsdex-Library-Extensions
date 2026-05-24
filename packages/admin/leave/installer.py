@@ -3,9 +3,9 @@ from discord.ui import View, Button
 
 REPO   = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
 BASE   = "https://api.github.com/repos/{}/contents/packages/admin/leave/{}".format(REPO, "{}")
-PKG    = "/code/ballsdex/packages/leaveserver"
+PKG    = "/code/ballsdex/packages/leave"
 CONFIG = "/code/config.yml"
-PACKAGE_ENTRY = "  - ballsdex.packages.leaveserver"
+PACKAGE_ENTRY = "  - ballsdex.packages.leave"
 FILES  = ("__init__.py", "cog.py")
 FOOTER = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
 FOOTER_TIMEOUT = FOOTER + " • Timed out"
@@ -66,7 +66,7 @@ def add_to_config():
 def remove_from_config():
     with open(CONFIG, "r") as f:
         lines = f.readlines()
-    lines = [l for l in lines if "ballsdex.packages.leaveserver" not in l]
+    lines = [l for l in lines if "ballsdex.packages.leave" not in l]
     with open(CONFIG, "w") as f:
         f.writelines(lines)
 
