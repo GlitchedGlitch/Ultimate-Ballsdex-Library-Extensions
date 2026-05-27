@@ -65,7 +65,7 @@ def LeaveCommand(bot: "BallsDexBot") -> app_commands.Command:
         )
 
         await interaction.followup.send(
-            f"Left the server **{guild_name}** (`{guild_id}`)",
+            f"Left the server: {guild_name} ({guild_id})",
             ephemeral=True,
         )
 
