@@ -378,9 +378,9 @@ if _is_v2():
             title="Incompatible Version",
             description=(
                 "This installer is for **v3** only.\n\n"
-                "Your dex appears to be running **v2**\n\n"
+                "Your instance appears to be running **v2**\n\n"
                 "Please use the **v2 branch** of this package instead, or update "
-                "your dex to v3 before installing."
+                "to v3 before installing."
             ),
             color=discord.Color.red(),
         ).set_footer(text=FOOTER)
