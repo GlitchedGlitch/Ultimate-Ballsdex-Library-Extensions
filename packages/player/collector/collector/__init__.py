@@ -1,6 +1,6 @@
-default_app_config = "collector.apps.CollectorAppConfig"
-
 from __future__ import annotations
+
+default_app_config = "collector.apps.CollectorAppConfig"
 import logging
 from typing import TYPE_CHECKING
 from discord import app_commands
