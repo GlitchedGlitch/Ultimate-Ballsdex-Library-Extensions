@@ -151,7 +151,7 @@ class CollectorCog(commands.GroupCog, name="collector"):
         inst = await BallInstance.objects.acreate(player=player, ball=ball, special=special, attack_bonus=0, health_bonus=0, server_id=ctx.guild.id if ctx.guild else None)
         self.bot.collector_claimed.setdefault(ball.pk, set()).add(ctx.author.id)
         log.info(f"{ctx.author} claimed collector {ball.country} / {special.name} (#{inst.pk:0X})", extra={"webhook": True})
-        await ctx.send(f"🎉 You claimed your **{special.emoji or ''} {special.name} {ball.country}** collector {settings.collectible_name}! (`#{inst.pk:0X}`)", ephemeral=True)
+        await ctx.send(f"You claimed your **{special.emoji or ''} {special.name} {ball.country}** collector {settings.collectible_name}! (`#{inst.pk:0X}`)", ephemeral=True)
 
     @commands.hybrid_command(name="list", description="List all active collector requirements")
     @app_commands.describe(reverse="Reverse the list order")
