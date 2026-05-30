@@ -7,7 +7,8 @@ from discord.ui import View, Button
 
 REPO       = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
 BRANCH     = "v3"
-GIT_URL    = f"git+https://github.com/{REPO}.git@{BRANCH}"
+# pip subdirectory syntax — points pip at the subfolder containing pyproject.toml
+GIT_URL    = f"git+https://github.com/{REPO}.git@{BRANCH}#subdirectory=packages/player/collector"
 APP_PATH   = "collector_app"
 TOML_MARKER = f'path = "{APP_PATH}"'
 TOML_ENTRY = (
@@ -109,7 +110,7 @@ def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
 
 def build_warning_embed() -> discord.Embed:
     e = discord.Embed(
-        title="Before Installing — Required Setup",
+        title="⚠️ Before Installing — Required Setup",
         description=(
             "The installer needs to write to `config/extra.toml`. "
             "By default Docker mounts this folder as **read-only**, "
@@ -219,14 +220,14 @@ class InstallWarningView(View):
                 ),
                 view=None,
             )
-        except PermissionError:
+        except OSError as e:
             self.parent.done = True
             self.stop()
             steps[0] = (steps[0][0], False)
             await self.parent.message.edit(
                 embed=build_result_embed(
                     "Permission Denied",
-                    "Could not write to `config/extra.toml` — the folder is still **read-only**.\n\n"
+                    f"Could not write to `config/extra.toml` — the folder is still **read-only** (`{e.strerror}`).\n\n"
                     "Make sure you edited `docker-compose.yml` and restarted the containers first:\n"
                     "```yaml\n- \"./config:/code/admin_panel/config:rw\"\n- \"./extra:/code/extra:rw\"\n```\n"
                     "```\ndocker compose down\ndocker compose up -d\n```\n"
@@ -377,7 +378,7 @@ if _is_v2():
         embed=discord.Embed(
             title="Incompatible Version",
             description=(
-                "This installer is for **BallsDex v3** only.\n\n"
+                "This installer is for **v3** only.\n\n"
                 "Your dex appears to be running **v2**\n\n"
                 "Please use the **v2 branch** of this package instead, or update "
                 "to v3 before installing."
