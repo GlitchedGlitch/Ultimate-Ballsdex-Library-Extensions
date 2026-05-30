@@ -210,11 +210,11 @@ class InstallWarningView(View):
             await self.parent.message.edit(
                 embed=build_result_embed(
                     "Entry Added — Rebuild Required",
-                    "Added to `config/extra.toml`.\n\n",
+                    "Added to `config/extra.toml`.\n\n"
                     "Now rebuild and restart your bot to finish the install:\n"
                     "```\ndocker compose build\ndocker compose up -d\n```\n"
                     "After the rebuild, `collector_app` will appear in the "
-                    "packages loaded log and all commands will be available.\n\n"
+                    "packages loaded log and all commands will be available.\n\n",
                     discord.Color.green(),
                 ),
                 view=None,
