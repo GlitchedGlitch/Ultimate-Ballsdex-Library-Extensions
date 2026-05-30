@@ -1,3 +1,5 @@
+default_app_config = "collector.apps.CollectorAppConfig"
+
 from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
