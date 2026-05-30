@@ -99,8 +99,6 @@ def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
             "• `admin collector set` — set a requirement and reward\n"
             "• `admin collector delete` — remove a requirement\n"
             "• `admin collector view` — inspect a requirement\n\n"
-            "**Updates** are automatic — `docker compose build` always pulls "
-            "the latest version from GitHub.\n\n"
             f"**Status:** {status}"
         ),
         color=color,
@@ -217,8 +215,6 @@ class InstallWarningView(View):
                     "```\ndocker compose build\ndocker compose up -d\n```\n"
                     "After the rebuild, `collector_app` will appear in the "
                     "packages loaded log and all commands will be available.\n\n"
-                    "**Updates are automatic** — running `docker compose build` "
-                    "again in the future will always pull the latest version.",
                     discord.Color.green(),
                 ),
                 view=None,
