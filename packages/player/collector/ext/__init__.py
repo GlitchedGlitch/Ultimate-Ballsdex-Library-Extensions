@@ -20,8 +20,7 @@ async def setup(bot: "BallsDexBot"):
         return
 
     admin_group: app_commands.Group = admin_cog.__cog_app_commands_group__
-    existing = admin_group.get_command("collector")
-    if existing:
+    if admin_group.get_command("collector"):
         admin_group.remove_command("collector")
 
     admin_cog_inst = CollectorAdminCog(bot)
@@ -30,8 +29,13 @@ async def setup(bot: "BallsDexBot"):
     sub = app_commands.Group(name="collector", description="Manage collector requirements")
     for cmd in admin_cog_inst.__cog_app_commands__:
         slash_name = cmd.name.removeprefix("collector-")
-        wrapped = app_commands.Command(name=slash_name, description=cmd.description or "-", callback=cmd._callback, parent=sub)
-        if hasattr(cmd, '_params'):
+        wrapped = app_commands.Command(
+            name=slash_name,
+            description=cmd.description or "-",
+            callback=cmd._callback,
+            parent=sub,
+        )
+        if hasattr(cmd, "_params"):
             wrapped._params = cmd._params
         sub.add_command(wrapped)
 
