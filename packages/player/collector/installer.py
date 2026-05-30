@@ -378,7 +378,7 @@ if _is_v2():
             title="Incompatible Version",
             description=(
                 "This installer is for **BallsDex v3** only.\n\n"
-                "Your dex appears to be running **v2**/n/n"
+                "Your dex appears to be running **v2**\n\n"
                 "Please use the **v2 branch** of this package instead, or update "
                 "to v3 before installing."
             ),
