@@ -12,4 +12,4 @@ dependencies = []
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["collector_app*"]
+include = ["collector*"]
