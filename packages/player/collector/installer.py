@@ -1,9 +1,8 @@
 """
 Collector Package Installer — BallsDex v3 :DD
-
 """
 
-import base64, io, os, re, requests, traceback, discord
+import io, os, re, traceback, discord
 from discord.ui import View, Button
 
 REPO       = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
@@ -19,22 +18,12 @@ TOML_ENTRY = (
     "editable = false\n"
 )
 
-EXTRA_TOML = "/code/config/extra.toml"
+# Correct path: docker-compose mounts ./config to /code/admin_panel/config
+EXTRA_TOML = "/code/admin_panel/config/extra.toml"
 
 FOOTER         = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
 FOOTER_TIMEOUT = FOOTER + " • Timed out"
 BAR_FILLED, BAR_EMPTY, BAR_LEN = "█", "░", 10
-
-RO_WARNING = (
-    "\n\n⚠️ **Before rebuilding**, make sure your `docker-compose.yml` has "
-    "`rw` (not `ro`) on these two lines:\n"
-    "```yaml\n"
-    "- \"./config:/code/config:rw\"\n"
-    "- \"./extra:/code/extra:rw\"\n"
-    "```\n"
-    "Then rebuild with:\n"
-    "```\ndocker compose build\ndocker compose up -d\n```"
-)
 
 
 # ── extra.toml helpers ────────────────────────────────────────────────────────
@@ -110,6 +99,8 @@ def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
             "• `admin collector set` — set a requirement and reward\n"
             "• `admin collector delete` — remove a requirement\n"
             "• `admin collector view` — inspect a requirement\n\n"
+            "**Updates** are automatic — `docker compose build` always pulls "
+            "the latest version from GitHub.\n\n"
             f"**Status:** {status}"
         ),
         color=color,
@@ -118,7 +109,31 @@ def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
     return e
 
 
-def build_confirm_embed() -> discord.Embed:
+def build_warning_embed() -> discord.Embed:
+    e = discord.Embed(
+        title="Before Installing — Required Setup",
+        description=(
+            "The installer needs to write to `config/extra.toml`. "
+            "By default Docker mounts this folder as **read-only**, "
+            "so you must edit your `docker-compose.yml` first.\n\n"
+            "**Find these two lines** in both the `bot` and `admin-panel` services "
+            "and change `:ro` to `:rw`:\n"
+            "```yaml\n"
+            "- \"./config:/code/admin_panel/config:rw\"\n"
+            "- \"./extra:/code/extra:rw\"\n"
+            "```\n"
+            "Then restart your containers:\n"
+            "```\ndocker compose down\ndocker compose up -d\n```\n\n"
+            "Once done, click **Confirm Install** below.\n"
+            "If you have already done this, you can proceed immediately."
+        ),
+        color=discord.Color.orange(),
+    )
+    e.set_footer(text=FOOTER)
+    return e
+
+
+def build_confirm_remove_embed() -> discord.Embed:
     e = discord.Embed(
         title="Remove Collector Package",
         description=(
@@ -150,7 +165,100 @@ def build_result_embed(title: str, description: str, color: discord.Color) -> di
     return e
 
 
-# ── Confirm remove ────────────────────────────────────────────────────────────
+# ── Warning gate view (shown before install) ──────────────────────────────────
+
+class InstallWarningView(View):
+    def __init__(self, parent: "CollectorInstallerView"):
+        super().__init__(timeout=120)
+        self.parent = parent
+
+    async def on_timeout(self):
+        if not self.parent.done:
+            color = discord.Color.gold() if self.parent.installed else discord.Color.greyple()
+            await self.parent.message.edit(
+                embed=build_main_embed(self.parent.installed, color), view=self.parent
+            )
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.parent.ctx.author.id:
+            await interaction.response.send_message("This menu is not for you.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="Confirm Install", style=discord.ButtonStyle.success, emoji="✅")
+    async def confirm_button(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        steps = [("Writing to config/extra.toml", None)]
+
+        async def update(i: int, success: bool = True):
+            steps[i] = (steps[i][0], success)
+            await self.parent.message.edit(
+                embed=_progress_embed("Installing Collector Package…", steps, discord.Color.blurple()),
+                view=None,
+            )
+
+        await self.parent.message.edit(
+            embed=_progress_embed("Installing Collector Package…", steps, discord.Color.blurple()),
+            view=None,
+        )
+
+        try:
+            _write_toml()
+            await update(0)
+            self.parent.installed = True
+            self.parent._update_buttons()
+            self.parent.done = True
+            self.stop()
+            await self.parent.message.edit(
+                embed=build_result_embed(
+                    "Entry Added — Rebuild Required",
+                    "Added to `config/extra.toml`.\n\n"
+                    "Now rebuild and restart your bot to finish the install:\n"
+                    "```\ndocker compose build\ndocker compose up -d\n```\n"
+                    "After the rebuild, `collector_app` will appear in the "
+                    "packages loaded log and all commands will be available.\n\n"
+                    "**Updates are automatic** — running `docker compose build` "
+                    "again in the future will always pull the latest version.",
+                    discord.Color.green(),
+                ),
+                view=None,
+            )
+        except PermissionError:
+            self.parent.done = True
+            self.stop()
+            steps[0] = (steps[0][0], False)
+            await self.parent.message.edit(
+                embed=build_result_embed(
+                    "Permission Denied",
+                    "Could not write to `config/extra.toml` — the folder is still **read-only**.\n\n"
+                    "Make sure you edited `docker-compose.yml` and restarted the containers first:\n"
+                    "```yaml\n- \"./config:/code/admin_panel/config:rw\"\n- \"./extra:/code/extra:rw\"\n```\n"
+                    "```\ndocker compose down\ndocker compose up -d\n```\n"
+                    "Then run the installer eval again.",
+                    discord.Color.red(),
+                ),
+                view=None,
+            )
+        except Exception:
+            err = traceback.format_exc()
+            self.parent.done = True
+            self.stop()
+            steps[0] = (steps[0][0], False)
+            await self.parent.message.edit(embed=build_error_embed("installing", err), view=None)
+            await interaction.followup.send(
+                file=discord.File(io.BytesIO(err.encode()), filename="install_error.txt")
+            )
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary, emoji="↩️")
+    async def cancel_button(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        color = discord.Color.gold() if self.parent.installed else discord.Color.greyple()
+        await self.parent.message.edit(
+            embed=build_main_embed(self.parent.installed, color), view=self.parent
+        )
+
+
+# ── Confirm remove view ───────────────────────────────────────────────────────
 
 class ConfirmRemoveView(View):
     def __init__(self, parent: "CollectorInstallerView"):
@@ -160,7 +268,9 @@ class ConfirmRemoveView(View):
     async def on_timeout(self):
         if not self.parent.done:
             color = discord.Color.gold() if self.parent.installed else discord.Color.greyple()
-            await self.parent.message.edit(embed=build_main_embed(self.parent.installed, color), view=self.parent)
+            await self.parent.message.edit(
+                embed=build_main_embed(self.parent.installed, color), view=self.parent
+            )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.parent.ctx.author.id:
@@ -174,14 +284,16 @@ class ConfirmRemoveView(View):
         try:
             _remove_toml()
             self.parent.installed = False
+            self.parent._update_buttons()
             self.parent.done = True
             self.stop()
             await self.parent.message.edit(
                 embed=build_result_embed(
                     "Entry Removed",
                     "Removed from `config/extra.toml`.\n\n"
-                    "The package will stop loading after the next rebuild.\n"
-                    "No ball instances were deleted." + RO_WARNING,
+                    "Rebuild to fully uninstall:\n"
+                    "```\ndocker compose build\ndocker compose up -d\n```\n"
+                    "No ball instances were deleted.",
                     discord.Color.red(),
                 ),
                 view=None,
@@ -191,13 +303,17 @@ class ConfirmRemoveView(View):
             self.parent.done = True
             self.stop()
             await self.parent.message.edit(embed=build_error_embed("removing", err), view=None)
-            await interaction.followup.send(file=discord.File(io.BytesIO(err.encode()), filename="remove_error.txt"))
+            await interaction.followup.send(
+                file=discord.File(io.BytesIO(err.encode()), filename="remove_error.txt")
+            )
 
     @discord.ui.button(label="No, go back", style=discord.ButtonStyle.secondary, emoji="↩️")
     async def cancel_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
         color = discord.Color.gold() if self.parent.installed else discord.Color.greyple()
-        await self.parent.message.edit(embed=build_main_embed(self.parent.installed, color), view=self.parent)
+        await self.parent.message.edit(
+            embed=build_main_embed(self.parent.installed, color), view=self.parent
+        )
 
 
 # ── Main installer view ───────────────────────────────────────────────────────
@@ -234,45 +350,13 @@ class CollectorInstallerView(View):
     @discord.ui.button(label="Install", style=discord.ButtonStyle.success, emoji="📥")
     async def install_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
-        steps = [("Writing to config/extra.toml", None)]
-
-        async def update(i: int, success: bool = True):
-            steps[i] = (steps[i][0], success)
-            await self.message.edit(embed=_progress_embed("Installing Collector Package…", steps, discord.Color.blurple()), view=None)
-
-        await self.message.edit(embed=_progress_embed("Installing Collector Package…", steps, discord.Color.blurple()), view=None)
-
-        try:
-            _write_toml()
-            await update(0)
-            self.installed = True
-            self._update_buttons()
-            self.done = True
-            self.stop()
-            await self.message.edit(
-                embed=build_result_embed(
-                    "Entry Added — Rebuild Required",
-                    f"Added to `config/extra.toml`.\n\n"
-                    f"The package installs automatically on rebuild and will appear "
-                    f"in the packages loaded log as `collector_app`.\n\n"
-                    f"**Commands after rebuild:**\n"
-                    f"• `collector claim`\n• `collector list`\n• `admin collector set/delete/view`\n\n"
-                    + RO_WARNING,
-                    discord.Color.green(),
-                ),
-                view=None,
-            )
-        except Exception:
-            err = traceback.format_exc()
-            self.done = True; self.stop()
-            steps[0] = (steps[0][0], False)
-            await self.message.edit(embed=build_error_embed("installing", err), view=None)
-            await interaction.followup.send(file=discord.File(io.BytesIO(err.encode()), filename="install_error.txt"))
+        # Show warning/confirmation gate before doing anything
+        await self.message.edit(embed=build_warning_embed(), view=InstallWarningView(self))
 
     @discord.ui.button(label="Remove", style=discord.ButtonStyle.danger, emoji="🗑️")
     async def remove_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
-        await self.message.edit(embed=build_confirm_embed(), view=ConfirmRemoveView(self))
+        await self.message.edit(embed=build_confirm_remove_embed(), view=ConfirmRemoveView(self))
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
