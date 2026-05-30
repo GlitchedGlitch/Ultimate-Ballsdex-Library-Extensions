@@ -11,11 +11,11 @@ GIT_URL    = f"git+https://github.com/{REPO}.git@{BRANCH}"
 APP_PATH   = "collector_app"
 TOML_MARKER = f'path = "{APP_PATH}"'
 TOML_ENTRY = (
-    "\n[[ballsdex.packages]]\n"
+    "\n# Collector Package\n"
+    "[[ballsdex.packages]]\n"
     f'location = "{GIT_URL}"\n'
     f'path = "{APP_PATH}"\n'
     "enabled = true\n"
-    "editable = false\n"
 )
 
 # Correct path: docker-compose mounts ./config to /code/admin_panel/config
@@ -230,7 +230,7 @@ class InstallWarningView(View):
                     "Make sure you edited `docker-compose.yml` and restarted the containers first:\n"
                     "```yaml\n- \"./config:/code/admin_panel/config:rw\"\n- \"./extra:/code/extra:rw\"\n```\n"
                     "```\ndocker compose down\ndocker compose up -d\n```\n"
-                    "Then run the installer eval again.",
+                    "Then run the installer again.",
                     discord.Color.red(),
                 ),
                 view=None,
