@@ -7,9 +7,9 @@ from discord.ui import View, Button
 
 REPO       = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
 BRANCH     = "v3"
-# pip subdirectory syntax — points pip at the subfolder containing pyproject.toml
+
 GIT_URL    = f"git+https://github.com/{REPO}.git@{BRANCH}#subdirectory=packages/player/collector"
-APP_PATH   = "collector_app"
+APP_PATH   = "collector"
 TOML_MARKER = f'path = "{APP_PATH}"'
 TOML_ENTRY = (
     "\n# Collector Package\n"
@@ -19,7 +19,6 @@ TOML_ENTRY = (
     "enabled = true\n"
 )
 
-# Correct path: docker-compose mounts ./config to /code/admin_panel/config
 EXTRA_TOML = "/code/admin_panel/config/extra.toml"
 
 FOOTER         = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
@@ -59,7 +58,7 @@ def _remove_toml():
     with open(EXTRA_TOML) as f:
         contents = f.read()
     cleaned = re.sub(
-        r"\n?\[\[ballsdex\.packages\]\][^\[]*path\s*=\s*\"collector_app\"[^\[]*",
+        r"\n?\[\[ballsdex\.packages\]\][^\[]*path\s*=\s*\"collector\"[^\[]*",
         "", contents, flags=re.DOTALL,
     )
     with open(EXTRA_TOML, "w") as f:
@@ -89,7 +88,7 @@ def _progress_embed(title: str, steps: list, color: discord.Color) -> discord.Em
 # ── Embeds ────────────────────────────────────────────────────────────────────
 
 def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
-    status = "Registered in `extra.toml` — rebuild to activate" if installed else "❌ Not installed"
+    status = "✅ Registered in `extra.toml` — rebuild to activate" if installed else "❌ Not installed"
     e = discord.Embed(
         title="Collector Package",
         description=(
@@ -214,7 +213,7 @@ class InstallWarningView(View):
                     "Added to `config/extra.toml`.\n\n"
                     "Now rebuild and restart your bot to finish the install:\n"
                     "```\ndocker compose build\ndocker compose up -d\n```\n"
-                    "After the rebuild, `collector_app` will appear in the "
+                    "After the rebuild, `collector` will appear in the "
                     "packages loaded log and all commands will be available.\n\n",
                     discord.Color.green(),
                 ),
@@ -381,7 +380,7 @@ if _is_v2():
                 "This installer is for **v3** only.\n\n"
                 "Your dex appears to be running **v2**\n\n"
                 "Please use the **v2 branch** of this package instead, or update "
-                "to v3 before installing."
+                "your dex to v3 before installing."
             ),
             color=discord.Color.red(),
         ).set_footer(text=FOOTER)
