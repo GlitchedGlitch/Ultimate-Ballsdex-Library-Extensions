@@ -7,7 +7,7 @@ from discord.ui import View, Button
 
 REPO       = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
 BRANCH     = "v3"
-
+# pip subdirectory syntax — points pip at the subfolder containing pyproject.toml
 GIT_URL    = f"git+https://github.com/{REPO}.git@{BRANCH}#subdirectory=packages/player/collector"
 APP_PATH   = "collector"
 TOML_MARKER = f'path = "{APP_PATH}"'
@@ -19,6 +19,7 @@ TOML_ENTRY = (
     "enabled = true\n"
 )
 
+# Correct path: docker-compose mounts ./config to /code/admin_panel/config
 EXTRA_TOML = "/code/admin_panel/config/extra.toml"
 
 FOOTER         = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
@@ -377,8 +378,8 @@ if _is_v2():
         embed=discord.Embed(
             title="Incompatible Version",
             description=(
-                "This installer is for **v3** only.\n\n"
-                "Your instance appears to be running **v2**\n\n"
+                "This installer is for **BallsDex v3** only.\n\n"
+                "Your instance appears to be running **v2**.\n\n"
                 "Please use the **v2 branch** of this package instead, or update "
                 "to v3 before installing."
             ),
