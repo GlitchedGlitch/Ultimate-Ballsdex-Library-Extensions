@@ -8,7 +8,7 @@ version = "1.0.0"
 description = "Collector system package for BallsDex v3."
 license = "MIT"
 authors = [{ name = "Glitch" }]
-dependencies = ["ballsdex>=3.0.0"]
+dependencies = []
 
 [tool.setuptools.packages.find]
 where = ["."]
