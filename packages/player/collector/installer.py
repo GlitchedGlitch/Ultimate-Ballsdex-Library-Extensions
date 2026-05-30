@@ -230,7 +230,7 @@ class InstallWarningView(View):
                     "Make sure you edited `docker-compose.yml` and restarted the containers first:\n"
                     "```yaml\n- \"./config:/code/admin_panel/config:rw\"\n- \"./extra:/code/extra:rw\"\n```\n"
                     "```\ndocker compose down\ndocker compose up -d\n```\n"
-                    "Then run the installer again.",
+                    "Then run the installer eval again.",
                     discord.Color.red(),
                 ),
                 view=None,
@@ -357,8 +357,37 @@ class CollectorInstallerView(View):
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-installed = is_installed()
-view      = CollectorInstallerView(bot, ctx, installed)
-color     = discord.Color.gold() if installed else discord.Color.greyple()
-message   = await ctx.send(embed=build_main_embed(installed, color), view=view)
-view.message = message
+def _is_v2() -> bool:
+    """Detect v2 by checking for Tortoise ORM and absence of a ready Django setup."""
+    try:
+        from django.apps import apps
+        apps.check_apps_ready()
+        return False  # Django is up — this is v3
+    except Exception:
+        pass
+    try:
+        import tortoise  # noqa: F401
+        return True  # Tortoise present, Django not ready — this is v2
+    except ImportError:
+        pass
+    return False
+
+if _is_v2():
+    await ctx.send(
+        embed=discord.Embed(
+            title="Incompatible Version",
+            description=(
+                "This installer is for **BallsDex v3** only.\n\n"
+                "Your dex appears to be running **v2**/n/n"
+                "Please use the **v2 branch** of this package instead, or update "
+                "to v3 before installing."
+            ),
+            color=discord.Color.red(),
+        ).set_footer(text=FOOTER)
+    )
+else:
+    installed = is_installed()
+    view      = CollectorInstallerView(bot, ctx, installed)
+    color     = discord.Color.gold() if installed else discord.Color.greyple()
+    message   = await ctx.send(embed=build_main_embed(installed, color), view=view)
+    view.message = message
