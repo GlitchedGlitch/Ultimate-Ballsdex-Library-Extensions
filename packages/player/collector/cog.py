@@ -362,7 +362,7 @@ class CollectorAdminGroup(app_commands.Group):
 
 # ── Player-facing cog ─────────────────────────────────────────────────────────
 
-class Collector(commands.Cog):
+class CollectorCog(commands.Cog):
     """Collector package"""
 
     def __init__(self, bot: "BallsDexBot"):
