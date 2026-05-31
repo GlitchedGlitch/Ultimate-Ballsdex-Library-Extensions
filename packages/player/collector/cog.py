@@ -64,7 +64,7 @@ def _ball_emoji(bot: "BallsDexBot", ball_id: int) -> str:
 
 
 def _find_ball_by_name(name: str):
-    """Find a ball from the cache by name."""
+    """Find a ball from the cache by name (case-insensitive)."""
     name = name.strip().lower()
     for ball in balls_cache.values():
         if ball.country.lower() == name:
@@ -73,7 +73,7 @@ def _find_ball_by_name(name: str):
 
 
 async def _find_special_by_name(name: str):
-    """Find a special by name."""
+    """Find a special by name (case-insensitive)."""
     name_lower = name.strip().lower()
     specials = await Special.all()
     for s in specials:
@@ -110,10 +110,9 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
         max_length=4000,
     )
 
-    def __init__(self, bot: "BallsDexBot", interaction: discord.Interaction):
+    def __init__(self, bot: "BallsDexBot"):
         super().__init__()
         self.bot = bot
-        self.original_interaction = interaction
 
     async def on_submit(self, interaction: discord.Interaction):
         # Must send a response immediately for modals — defer then followup
@@ -166,7 +165,7 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
                 "special_name": special.name,
             }
             self.bot.collector_claimed.pop(ball.pk, None)
-            added.append(f"**{ball.country}** — ≥{amount} → {special.name}")
+            added.append(f"**{ball.country}** — ≥{amount} -> {special.name}")
 
         if added:
             _save_requirements(self.bot.collector_requirements)
@@ -304,33 +303,11 @@ class CollectorAdminGroup(app_commands.Group):
         self,
         interaction: discord.Interaction["BallsDexBot"],
     ):
-        embed = discord.Embed(
-            title="Bulk Add Collector Requirements",
-            description=(
-                "Add multiple requirements at once using the format below.\n\n"
-                "**Format** (one per line):\n"
-                "```\n"
-                "BallName | Amount | SpecialName\n"
-                "```\n"
-                "**Example:**\n"
-                "```\n"
-                "France | 5 | Shiny\n"
-                "Germany | 10 | Gold\n"
-                "Japan | 3 | Shiny\n"
-                "```\n\n"
-                "⚠️ Ball names and special names must match exactly as they appear in the bot.\n"
-                f"Existing requirements for the same {settings.collectible_name} will be **overwritten**.\n"
-                f"Claims for updated {settings.collectible_name} will be **reset**.\n\n"
-                "Press **Open Input** to enter your requirements."
-            ),
-            color=discord.Color.blurple(),
-        )
-        view = BulkConfirmView(self.bot, interaction)
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        await interaction.response.send_modal(BulkAddModal(self.bot))
 
     @app_commands.command(name="delete", description="Delete a collector requirement")
     @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
-    @app_commands.describe(countryball=f"The {settings.collectible_name} whose requirement you want to remove")
+    @app_commands.describe(countryball="The ball whose requirement you want to remove")
     async def collector_delete(
         self,
         interaction: discord.Interaction["BallsDexBot"],
@@ -385,8 +362,8 @@ class CollectorAdminGroup(app_commands.Group):
 
 # ── Player-facing cog ─────────────────────────────────────────────────────────
 
-class CollectorCog(commands.Cog):
-    """Collector package — player commands."""
+class Collector(commands.Cog):
+    """Collector package"""
 
     def __init__(self, bot: "BallsDexBot"):
         self.bot = bot
@@ -428,7 +405,7 @@ class CollectorCog(commands.Cog):
 
         if interaction.user.id in claimed.get(ball_id, set()):
             await interaction.followup.send(
-                f"You have already claimed your collector **{ball.country}**!",
+                f"You have already claimed your collector **{ball.country}** {settings.collectible_name}!",
                 ephemeral=True,
             )
             return
@@ -437,7 +414,7 @@ class CollectorCog(commands.Cog):
         required = req["amount"]
         if count < required:
             await interaction.followup.send(
-                f"You need at least **{required}** {ball.country} "
+                f"You need at least **{required}** {ball.country} {settings.collectible_name_plural}"
                 f"but you only have **{count}**.",
                 ephemeral=True,
             )
@@ -461,19 +438,6 @@ class CollectorCog(commands.Cog):
             server_id=interaction.guild_id,
         )
         claimed.setdefault(ball_id, set()).add(interaction.user.id)
-
-        log.info(
-            "User %s (%d) claimed collector %s / special %s (#%X)",
-            interaction.user, interaction.user.id, ball.country, special.name, new_instance.pk,
-        )
-        await log_action(
-            f"{interaction.user.name} claimed {ball.country} "
-            f"`(#{new_instance.pk:0X})`. "
-            f"(Special={special.name} "
-            f"ATK={new_instance.attack_bonus:+d} "
-            f"HP={new_instance.health_bonus:+d})",
-            interaction.client,
-        )
 
         emoji_str = special.emoji or ""
         await interaction.followup.send(
