@@ -2,7 +2,7 @@ import asyncio, base64, io, os, requests, traceback, discord
 from discord.ui import View, Button
 
 REPO = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
-BASE = "https://api.github.com/repos/REPO/contents/packages/player/rarity/{}?ref=v2-main".format("{}")
+BASE = "https://api.github.com/repos/GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions/contents/packages/player/rarity/{}?ref=v2-main".format("{}")
 PKG = "/code/ballsdex/packages/rarity"
 CONFIG = "/code/config.yml"
 PACKAGE_ENTRY = "  - ballsdex.packages.rarity"
