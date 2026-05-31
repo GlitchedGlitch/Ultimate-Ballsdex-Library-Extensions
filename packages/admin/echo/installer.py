@@ -2,7 +2,7 @@ import asyncio, base64, io, os, re, requests, traceback, discord
 from discord.ui import View, Button, Modal, TextInput
 
 REPO = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
-BASE = "https://api.github.com/repos/{}/contents/packages/admin/echo/{}".format(REPO, "{}")
+BASE = "https://api.github.com/repos/REPO/contents/packages/CATEGORY/PACKAGE/{}?ref=v2-main".format("{}")
 PKG = "/code/ballsdex/packages/echo"
 CONFIG = "/code/config.yml"
 NAME_FILE = os.path.join(PKG, "name.txt")
