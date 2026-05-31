@@ -7,7 +7,7 @@ PKG = "/code/ballsdex/packages/collector"
 CONFIG = "/code/config.yml"
 REQUIREMENTS_FILE = os.path.join(PKG, "requirements.txt")
 PACKAGE_ENTRY = "  - ballsdex.packages.collector"
-FILES = ("__init.py__", "models.py", "cog.py", "admin.py", "apps.py")
+FILES = ("__init__.py", "models.py", "cog.py", "admin.py", "apps.py")
 FOOTER = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
 FOOTER_TIMEOUT = FOOTER + " • Timed out"
 
