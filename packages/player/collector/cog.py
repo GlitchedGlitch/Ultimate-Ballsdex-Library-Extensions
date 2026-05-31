@@ -1,13 +1,5 @@
 """
-Collector package for BallsDex
-
-Commands:
-  /collector claim  — claim a collector ball if requirements are met
-  /collector list   — paginated list of active requirements
-  /admin collector set    — set a requirement (admin only)
-  /admin collector bulk   — set multiple requirements at once (admin only)
-  /admin collector delete — delete a requirement (admin only)
-  /admin collector view   — inspect a requirement (admin only)
+Collector package for BallsDex :)))
 """
 
 from __future__ import annotations
@@ -72,7 +64,7 @@ def _ball_emoji(bot: "BallsDexBot", ball_id: int) -> str:
 
 
 def _find_ball_by_name(name: str):
-    """Find a ball from the cache by name (case-insensitive)."""
+    """Find a ball from the cache by name."""
     name = name.strip().lower()
     for ball in balls_cache.values():
         if ball.country.lower() == name:
@@ -81,10 +73,13 @@ def _find_ball_by_name(name: str):
 
 
 async def _find_special_by_name(name: str):
-    """Find a special by name (case-insensitive)."""
-    name = name.strip().lower()
-    special = await Special.get_or_none(name__iexact=name)
-    return special
+    """Find a special by name."""
+    name_lower = name.strip().lower()
+    specials = await Special.all()
+    for s in specials:
+        if s.name.lower() == name_lower:
+            return s
+    return None
 
 
 # ── Bulk modal ────────────────────────────────────────────────────────────────
@@ -121,7 +116,8 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
         self.original_interaction = interaction
 
     async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
+        # Must send a response immediately for modals — defer then followup
+        await interaction.response.defer(ephemeral=True, thinking=True)
 
         lines = [l.strip() for l in self.requirements_input.value.splitlines() if l.strip()]
         if not lines:
@@ -152,7 +148,7 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
             # Find ball
             ball = _find_ball_by_name(ball_name)
             if ball is None:
-                errors.append(f"`{line}` — ball `{ball_name}` not found")
+                errors.append(f"`{line}` — {settings.collectible_name} `{ball_name}` not found")
                 continue
 
             # Find special
@@ -264,7 +260,7 @@ class CollectorAdminGroup(app_commands.Group):
     @app_commands.command(name="set", description="Set or update a collector requirement")
     @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
     @app_commands.describe(
-        countryball="The ball to set a requirement for",
+        countryball=f"The {settings.collectible_name} to set a requirement for",
         amount="Minimum number the player must own",
         special="The special reward the player receives",
     )
@@ -288,8 +284,8 @@ class CollectorAdminGroup(app_commands.Group):
 
         await interaction.response.send_message(
             f"Collector requirement set: **{ball.country}** — "
-            f"own ≥ **{amount}** → reward **{special.name}**.\n"
-            f"Previous claims for this ball have been reset.",
+            f"own ≥ **{amount}** -> reward **{special.name}**.\n"
+            f"Previous claims for this {settings.collectible_name} have been reset.",
             ephemeral=True,
         )
         await log_action(
@@ -309,7 +305,7 @@ class CollectorAdminGroup(app_commands.Group):
         interaction: discord.Interaction["BallsDexBot"],
     ):
         embed = discord.Embed(
-            title="📋 Bulk Add Collector Requirements",
+            title="Bulk Add Collector Requirements",
             description=(
                 "Add multiple requirements at once using the format below.\n\n"
                 "**Format** (one per line):\n"
@@ -323,8 +319,8 @@ class CollectorAdminGroup(app_commands.Group):
                 "Japan | 3 | Shiny\n"
                 "```\n\n"
                 "⚠️ Ball names and special names must match exactly as they appear in the bot.\n"
-                "Existing requirements for the same ball will be **overwritten**.\n"
-                "Claims for updated balls will be **reset**.\n\n"
+                f"Existing requirements for the same {settings.collectible_name} will be **overwritten**.\n"
+                f"Claims for updated {settings.collectible_name} will be **reset**.\n\n"
                 "Press **Open Input** to enter your requirements."
             ),
             color=discord.Color.blurple(),
@@ -334,7 +330,7 @@ class CollectorAdminGroup(app_commands.Group):
 
     @app_commands.command(name="delete", description="Delete a collector requirement")
     @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
-    @app_commands.describe(countryball="The ball whose requirement you want to remove")
+    @app_commands.describe(countryball=f"The {settings.collectible_name} whose requirement you want to remove")
     async def collector_delete(
         self,
         interaction: discord.Interaction["BallsDexBot"],
@@ -352,7 +348,7 @@ class CollectorAdminGroup(app_commands.Group):
         _save_requirements(self.bot.collector_requirements)
 
         await interaction.response.send_message(
-            f"🗑️ Collector requirement for **{ball.country}** has been deleted.",
+            f"Collector requirement for **{ball.country}** has been deleted.",
             ephemeral=True,
         )
         await log_action(
@@ -363,7 +359,7 @@ class CollectorAdminGroup(app_commands.Group):
 
     @app_commands.command(name="view", description="View a specific collector requirement")
     @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
-    @app_commands.describe(countryball="The ball to inspect")
+    @app_commands.describe(countryball=f"The {settings.collectible_name} to inspect")
     async def collector_view(
         self,
         interaction: discord.Interaction["BallsDexBot"],
@@ -407,7 +403,7 @@ class CollectorCog(commands.Cog):
     # ── /collector claim ──────────────────────────────────────────────────────
 
     @collector_group.command(name="claim", description="Claim your collector ball reward")
-    @app_commands.describe(countryball="The ball you want to claim a collector version of")
+    @app_commands.describe(countryball=f"The {settings.collectible_name} you want to claim a collector version of")
     async def collector_claim(
         self,
         interaction: discord.Interaction["BallsDexBot"],
@@ -481,7 +477,7 @@ class CollectorCog(commands.Cog):
 
         emoji_str = special.emoji or ""
         await interaction.followup.send(
-            f"🎉 Congratulations! You claimed your **{emoji_str} {special.name} {ball.country}** "
+            f"Congratulations! You claimed your **{emoji_str} {special.name} {ball.country}** "
             f"collector {settings.collectible_name}!\n"
             f"Added to your collection as `#{new_instance.pk:0X}`.",
             ephemeral=True,
@@ -490,7 +486,7 @@ class CollectorCog(commands.Cog):
     # ── /collector list ───────────────────────────────────────────────────────
 
     @collector_group.command(name="list", description="List all active collector requirements")
-    @app_commands.describe(reverse="Sort from highest to lowest amount (default: lowest first)")
+    @app_commands.describe(reverse="Reverse the output of the list")
     async def collector_list(
         self,
         interaction: discord.Interaction["BallsDexBot"],
@@ -521,7 +517,6 @@ class CollectorCog(commands.Cog):
             entries.append((f"Minimum: {amount}", "\n".join(lines)))
 
         total_pages = -(-len(entries) // GROUPS_PER_PAGE)
-        sort_label = "Highest → Lowest" if reverse else "Lowest → Highest"
 
         source = FieldPageSource(entries, per_page=GROUPS_PER_PAGE, inline=False)
         source.embed.title = "Collector List"
@@ -529,7 +524,7 @@ class CollectorCog(commands.Cog):
 
         if total_pages > 1:
             source.embed.set_footer(
-                text=f"{len(requirements)} requirement(s) • Sorted: {sort_label}"
+                text=f"{len(requirements)} requirement(s)"
             )
         else:
             source.embed.set_footer(text=f"{len(requirements)} requirement(s)")
