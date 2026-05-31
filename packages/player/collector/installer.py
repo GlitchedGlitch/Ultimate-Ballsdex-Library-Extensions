@@ -2,7 +2,7 @@ import base64, io, json, os, requests, traceback, discord
 from discord.ui import View, Button
 
 REPO = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
-BASE = "https://api.github.com/repos/REPO/contents/packages/player/collector/{}?ref=v2-main".format("{}")
+BASE = f"https://api.github.com/repos/{REPO}/contents/packages/player/collector/{}?ref=v2-main".format("{}")
 PKG = "/code/ballsdex/packages/collector"
 CONFIG = "/code/config.yml"
 REQUIREMENTS_FILE = os.path.join(PKG, "requirements.txt")
