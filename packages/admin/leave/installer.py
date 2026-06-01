@@ -412,8 +412,37 @@ class LeaveInstallerView(View):
         await self.message.edit(embed=build_confirm_embed(), view=ConfirmDeleteView(self))
 
 
-installed = is_installed()
-view = LeaveInstallerView(bot, ctx, installed)
-initial_color = discord.Color.gold() if installed else discord.Color.greyple()
-message = await ctx.send(embed=build_main_embed(installed, initial_color), view=view)
-view.message = message
+def _is_v3() -> bool:
+    """Detect v3 by checking for Django setup and absence of a ready Tortoise ORM."""
+    try:
+        from django.apps import apps
+        apps.check_apps_ready()
+        return True  # Django is up — this is v3
+    except Exception:
+        pass
+    try:
+        import tortoise  # noqa: F401
+        return False  # Tortoise present, Django not ready — this is v2
+    except ImportError:
+        pass
+    return True
+
+if _is_v3():
+    await ctx.send(
+        embed=discord.Embed(
+            title="Incompatible Version",
+            description=(
+                "This installer is for **BallsDex v2** only.\n\n"
+                "Your instance appears to be running **v3**.\n\n"
+                "Please use the **v3 branch** of this package instead, or downgrade "
+                "to v2 before installing."
+            ),
+            color=discord.Color.red(),
+        ).set_footer(text=FOOTER)
+    )
+else:
+    installed = is_installed()
+    view      = CollectorInstallerView(bot, ctx, installed)
+    color     = discord.Color.gold() if installed else discord.Color.greyple()
+    message   = await ctx.send(embed=build_main_embed(installed, color), view=view)
+    view.message = message
