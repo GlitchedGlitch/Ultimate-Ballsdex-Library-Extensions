@@ -179,12 +179,12 @@ class ConfirmDeleteView(View):
         async def update(i: int, success: bool = True):
             steps[i] = (steps[i][0], success)
             await self.parent.message.edit(
-                embed=_progress_embed("🗑️ Deleting Collector Package…", steps, discord.Color.red()),
+                embed=_progress_embed("Deleting Collector Package…", steps, discord.Color.red()),
                 view=None,
             )
 
         await self.parent.message.edit(
-            embed=_progress_embed("🗑️ Deleting Collector Package…", steps, discord.Color.red()),
+            embed=_progress_embed("Deleting Collector Package…", steps, discord.Color.red()),
             view=None,
         )
 
