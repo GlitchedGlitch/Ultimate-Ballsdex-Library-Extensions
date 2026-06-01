@@ -329,11 +329,37 @@ class BrowserView(View):
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-try:
-    categories = get_categories()
-except Exception as e:
-    await ctx.send(f"Failed to fetch package list:\n```py\n{e}\n```")
+def _is_v2() -> bool:
+    """Detect v2 by checking for Tortoise ORM and absence of a ready Django setup."""
+    try:
+        from django.apps import apps
+        apps.check_apps_ready()
+        return False  # Django is up — this is v3
+    except Exception:
+        pass
+    try:
+        import tortoise  # noqa: F401
+        return True  # Tortoise present, Django not ready — this is v2
+    except ImportError:
+        pass
+    return False
+
+if _is_v2():
+    await ctx.send(
+        embed=discord.Embed(
+            title="Incompatible Version",
+            description=(
+                "This browser is for **BallsDex v3** only.\n\n"
+                "Your instance appears to be running **v2**.\n\n"
+                "Please use the **v2 branch** of the browser instead, or update "
+                "to v3 before scrolling."
+            ),
+            color=discord.Color.red(),
+        ).set_footer(text=FOOTER)
+    )
 else:
-    view = BrowserView(bot, ctx, categories)
-    message = await ctx.send(embed=root_embed(categories), view=view)
+    installed = is_installed()
+    view      = BrowserView(bot, ctx, installed)
+    color     = discord.Color.gold() if installed else discord.Color.greyple()
+    message   = await ctx.send(embed=build_main_embed(installed, color), view=view)
     view.message = message
