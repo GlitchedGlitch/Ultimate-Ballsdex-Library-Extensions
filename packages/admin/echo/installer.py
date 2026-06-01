@@ -613,7 +613,24 @@ if _is_v3():
     )
 else:
     installed = is_installed()
-    view      = EchoInstallerView(bot, ctx, installed)
-    color     = discord.Color.gold() if installed else discord.Color.greyple()
-    message   = await ctx.send(embed=build_main_embed(installed, color), view=view)
+    cmd_name = get_command_name()
+
+    view = EchoInstallerView(
+        bot,
+        ctx,
+        installed,
+        cmd_name
+    )
+
+    color = discord.Color.gold() if installed else discord.Color.greyple()
+
+    message = await ctx.send(
+        embed=build_main_embed(
+            installed,
+            color,
+            cmd_name
+        ),
+        view=view
+    )
+
     view.message = message
