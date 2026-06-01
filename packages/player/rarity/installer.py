@@ -191,12 +191,12 @@ class ConfirmDeleteView(View):
         async def update(i: int, success: bool = True):
             steps[i] = (steps[i][0], success)
             await self.parent.message.edit(
-                embed=_progress_embed("🗑️ Deleting Rarity Package…", steps, discord.Color.red()),
+                embed=_progress_embed("Deleting Rarity Package…", steps, discord.Color.red()),
                 view=None,
             )
 
         await self.parent.message.edit(
-            embed=_progress_embed("🗑️ Deleting Rarity Package…", steps, discord.Color.red()),
+            embed=_progress_embed("Deleting Rarity Package…", steps, discord.Color.red()),
             view=None,
         )
 
@@ -224,7 +224,7 @@ class ConfirmDeleteView(View):
             self.stop()
             await self.parent.message.edit(
                 embed=build_result_embed(
-                    "🗑️ Successfully Deleted",
+                    "Successfully Deleted",
                     (
                         "The **Rarity Package** has been removed.\n\n"
                         "• Rarity command removed from Discord\n"
