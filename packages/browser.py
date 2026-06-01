@@ -330,6 +330,13 @@ class BrowserView(View):
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
+def _is_v3():
+    try:
+        from django.apps import apps
+        apps.check_apps_ready()
+        return True
+    except Exception:
+        return False
 
 if _is_v3():
     await ctx.send(
