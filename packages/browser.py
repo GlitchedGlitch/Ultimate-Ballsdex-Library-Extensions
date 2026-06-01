@@ -331,21 +331,6 @@ class BrowserView(View):
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-def _is_v3() -> bool:
-    """Detect v3 by checking for Django setup and absence of a ready Tortoise ORM."""
-    try:
-        from django.apps import apps
-        apps.check_apps_ready()
-        return True  # Django is up — this is v3
-    except Exception:
-        pass
-    try:
-        import tortoise  # noqa: F401
-        return False  # Tortoise present, Django not ready — this is v2
-    except ImportError:
-        pass
-    return True
-
 if _is_v3():
     await ctx.send(
         embed=discord.Embed(
@@ -359,9 +344,11 @@ if _is_v3():
             color=discord.Color.red(),
         ).set_footer(text=FOOTER)
     )
-else:
-    installed = is_installed()
-    view      = BrowserView(bot, ctx, installed)
-    color     = discord.Color.gold() if installed else discord.Color.greyple()
-    message   = await ctx.send(embed=build_main_embed(installed, color), view=view)
-    view.message = message
+    return
+categories = get_categories()
+view = BrowserView(bot, ctx, categories)
+message = await ctx.send(
+    embed=root_embed(categories),
+    view=view
+)
+view.message = message
