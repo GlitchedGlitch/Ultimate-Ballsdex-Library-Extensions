@@ -115,7 +115,6 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
         self.bot = bot
 
     async def on_submit(self, interaction: discord.Interaction):
-        # Must send a response immediately for modals — defer then followup
         await interaction.response.defer(ephemeral=True, thinking=True)
 
         lines = [l.strip() for l in self.requirements_input.value.splitlines() if l.strip()]
@@ -124,7 +123,6 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
             return
 
         added:   list[str] = []
-        skipped: list[str] = []
         errors:  list[str] = []
 
         for line in lines:
@@ -135,7 +133,6 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
 
             ball_name, amount_str, special_name = parts
 
-            # Validate amount
             try:
                 amount = int(amount_str)
                 if not (1 <= amount <= 9999):
@@ -144,19 +141,16 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
                 errors.append(f"`{line}` — amount must be a number between 1 and 9999")
                 continue
 
-            # Find ball
             ball = _find_ball_by_name(ball_name)
             if ball is None:
                 errors.append(f"`{line}` — {settings.collectible_name} `{ball_name}` not found")
                 continue
 
-            # Find special
             special = await _find_special_by_name(special_name)
             if special is None:
                 errors.append(f"`{line}` — special `{special_name}` not found")
                 continue
 
-            # Set requirement
             self.bot.collector_requirements[ball.pk] = {
                 "ball_id": ball.pk,
                 "ball_name": ball.country,
@@ -170,27 +164,20 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
         if added:
             _save_requirements(self.bot.collector_requirements)
 
-        # Build result message
         result_lines: list[str] = []
         if added:
             result_lines.append(f"**Added {len(added)} requirement(s):**")
             result_lines.extend(added)
-        if skipped:
-            result_lines.append(f"\n**Skipped {len(skipped)}:**")
-            result_lines.extend(skipped)
         if errors:
             result_lines.append(f"\n**Errors ({len(errors)}):**")
             result_lines.extend(errors)
 
         result_text = "\n".join(result_lines)
-
-        # Split if too long for one message
         if len(result_text) > 1900:
             result_text = result_text[:1900] + "\n... (truncated)"
 
         await interaction.followup.send(result_text, ephemeral=True)
 
-        # Log to admin channel
         if added:
             await log_action(
                 f"{interaction.user.name} bulk added {len(added)} collector requirement(s). "
@@ -201,46 +188,6 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
             "Bulk add by %s: %d added, %d errors",
             interaction.user, len(added), len(errors),
         )
-
-
-# ── Bulk confirm view ─────────────────────────────────────────────────────────
-
-class BulkConfirmView(discord.ui.View):
-    """
-    Shown before opening the bulk modal — gives the admin the format guide
-    and a button to open the input modal.
-    """
-
-    def __init__(self, bot: "BallsDexBot", interaction: discord.Interaction):
-        super().__init__(timeout=120)
-        self.bot = bot
-        self.interaction = interaction
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.interaction.user.id:
-            await interaction.response.send_message("This menu is not for you.", ephemeral=True)
-            return False
-        return True
-
-    async def on_timeout(self):
-        for c in self.children:
-            c.disabled = True
-        try:
-            await self.interaction.edit_original_response(view=self)
-        except Exception:
-            pass
-
-    @discord.ui.button(label="Open Input", style=discord.ButtonStyle.success, emoji="📝")
-    async def open_modal(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(BulkAddModal(self.bot, self.interaction))
-        self.stop()
-
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary, emoji="✖️")
-    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(
-            content="Bulk add cancelled.", embed=None, view=None
-        )
-        self.stop()
 
 
 # ── /admin collector — standalone Group ───────────────────────────────────────
@@ -414,7 +361,7 @@ class CollectorCog(commands.Cog):
         required = req["amount"]
         if count < required:
             await interaction.followup.send(
-                f"You need at least **{required}** {ball.country} {settings.collectible_name_plural}"
+                f"You need at least **{required}** {ball.country} {settings.plural_collectible_name} "
                 f"but you only have **{count}**.",
                 ephemeral=True,
             )
@@ -438,6 +385,19 @@ class CollectorCog(commands.Cog):
             server_id=interaction.guild_id,
         )
         claimed.setdefault(ball_id, set()).add(interaction.user.id)
+
+        log.info(
+            "User %s (%d) claimed collector %s / special %s (#%X)",
+            interaction.user, interaction.user.id, ball.country, special.name, new_instance.pk,
+        )
+        await log_action(
+            f"{interaction.user.name} claimed {ball.country} "
+            f"`(#{new_instance.pk:0X})`. "
+            f"(Special={special.name} "
+            f"ATK={new_instance.attack_bonus:+d} "
+            f"HP={new_instance.health_bonus:+d})",
+            interaction.client,
+        )
 
         emoji_str = special.emoji or ""
         await interaction.followup.send(
@@ -485,13 +445,7 @@ class CollectorCog(commands.Cog):
         source = FieldPageSource(entries, per_page=GROUPS_PER_PAGE, inline=False)
         source.embed.title = "Collector List"
         source.embed.color = discord.Color.gold()
-
-        if total_pages > 1:
-            source.embed.set_footer(
-                text=f"{len(requirements)} requirement(s)"
-            )
-        else:
-            source.embed.set_footer(text=f"{len(requirements)} requirement(s)")
+        source.embed.set_footer(text=f"{len(requirements)} requirement(s)")
 
         pages = Pages(source, interaction=interaction)
         await pages.start(ephemeral=True)
