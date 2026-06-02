@@ -78,7 +78,7 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
     @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
     @app_commands.describe(
         message="The text content to send or use when editing",
-        image="An image to attach (only used when sending, not editing)",
+        file="A file to attach",
         embed="Wrap the message text in an embed",
         channel="Channel ID or <#mention> to send to — works cross-server (default: current channel)",
         dm="User ID to send the message to via DM (ignores channel parameter)",
@@ -89,7 +89,7 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
     async def echo(
         interaction: discord.Interaction,
         message: str | None = None,
-        image: discord.Attachment | None = None,
+        file: discord.Attachment | None = None,
         embed: bool = False,
         channel: str | None = None,
         dm: discord.User | None = None,
@@ -97,9 +97,9 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
         edit_message: str | None = None,
         delete_message: str | None = None,
     ):
-        if not message and not image and not edit_message and not delete_message:
+        if not message and not file and not edit_message and not delete_message:
             await interaction.response.send_message(
-                "You must provide at least a `message`, an `image`, "
+                "You must provide at least a `message`, a `file`, "
                 "an `edit_message` link, or a `delete_message` link.",
                 ephemeral=True,
             )
@@ -151,9 +151,9 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
             elif message:
                 kwargs["content"] = message
 
-            if image:
+            if file:
                 kwargs["files"] = [
-                    await image.to_file()
+                    await file.to_file()
                 ]
 
             try:
@@ -175,15 +175,15 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
                     (
                         f"Message: {message!r}"
                         if message
-                        else "Message: [image only]"
+                        else "Message: [file only]"
                     ),
                 ]
 
-                if image:
+                if file:
                     parts.append(
-                        f"Image: "
-                        f"{image.filename} "
-                        f"{image.url}"
+                        f"File: "
+                        f"{file.filename} "
+                        f"{file.url}"
                     )
 
                 if embed:
@@ -299,8 +299,8 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
             kwargs["embed"] = discord.Embed(description=message or "")
         elif message:
             kwargs["content"] = message
-        if image:
-            kwargs["files"] = [await image.to_file()]
+        if file:
+            kwargs["files"] = [await file.to_file()]
         if reply_msg:
             kwargs["reference"] = reply_msg
             kwargs["mention_author"] = False
@@ -311,10 +311,10 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
             parts = [
                 f"{interaction.user.name} sent a message in "
                 f"#{target} {sent_msg.jump_url}",
-                f"Message: {message!r}" if message else "Message: [image only]",
+                f"Message: {message!r}" if message else "Message: [file only]",
             ]
-            if image:
-                parts.append(f"Image: {image.filename} {image.url}")
+            if file:
+                parts.append(f"File: {file.filename} {file.url}")
             if embed:
                 parts.append("Embed: True")
             if reply_msg:
