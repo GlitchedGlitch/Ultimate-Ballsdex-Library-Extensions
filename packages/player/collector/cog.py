@@ -128,6 +128,7 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
             )
 
     async def _process(self, interaction: discord.Interaction):
+        lines = [l.strip() for l in self.requirements_input.value.splitlines() if l.strip()]
         if not lines:
             await interaction.followup.send("No requirements provided.", ephemeral=True)
             return
