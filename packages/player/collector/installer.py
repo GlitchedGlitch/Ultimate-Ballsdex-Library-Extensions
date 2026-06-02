@@ -94,7 +94,7 @@ def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
             "• `/collector list` — view all active requirements\n"
             "• `/admin collector set` — set a requirement and reward\n"
             "• `/admin collector delete` — remove a requirement\n"
-            "• `/admin collector bulk` — bulk add requirement\n"
+            "• `/admin collector bulk` — bulk add requirements\n"
             "• `/admin collector view` — inspect a requirement\n\n"
             "**How it works**\n"
             "Admins configure a minimum ball count and a special reward. "
