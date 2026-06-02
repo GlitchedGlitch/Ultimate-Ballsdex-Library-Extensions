@@ -89,7 +89,7 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
     Modal for adding multiple collector requirements at once.
 
     Format (one per line):
-      BallName | Amount | SpecialName
+      Ball | Amount | Special
 
     Example:
       France | 5 | Shiny
@@ -98,7 +98,7 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
     """
 
     requirements_input = TextInput(
-        label="BallName | Amount | SpecialName",
+        label="Ball | Amount | Special",
         style=discord.TextStyle.paragraph,
         placeholder=(
             "One requirement per line:\n"
@@ -139,7 +139,7 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
         for line in lines:
             parts = [p.strip() for p in line.split("|")]
             if len(parts) != 3:
-                errors.append(f"`{line}` — must be `BallName | Amount | SpecialName`")
+                errors.append(f"`{line}` — must be `Ball | Amount | Special`")
                 continue
 
             ball_name, amount_str, special_name = parts
