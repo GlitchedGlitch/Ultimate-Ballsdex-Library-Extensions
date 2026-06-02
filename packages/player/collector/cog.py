@@ -116,8 +116,18 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            await self._process(interaction)
+        except Exception:
+            import traceback
+            err = traceback.format_exc()
+            log.exception("Error in bulk add modal")
+            await interaction.followup.send(
+                f"An error occurred:\n```py\n{err[:1800]}\n```",
+                ephemeral=True,
+            )
 
-        lines = [l.strip() for l in self.requirements_input.value.splitlines() if l.strip()]
+    async def _process(self, interaction: discord.Interaction):
         if not lines:
             await interaction.followup.send("No requirements provided.", ephemeral=True)
             return
