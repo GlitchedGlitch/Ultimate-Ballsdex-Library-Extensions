@@ -125,7 +125,7 @@ def build_main_embed(installed: bool, color: discord.Color, cmd_name: str) -> di
             f"• `/admin {cmd_name}` — send, edit or reply to messages as the bot\n\n"
             "**Parameters**\n"
             "• `message` — text content to send or edit with\n"
-            "• `image` — file attachment to include\n"
+            "• `file` — file attachment to include\n"
             "• `embed` — wrap message in an embed\n"
             "• `channel` — target channel (works cross-server)\n"
             "• `dm` — dms a specified user\n"
