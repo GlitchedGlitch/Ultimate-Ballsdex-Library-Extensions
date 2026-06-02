@@ -98,7 +98,7 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
     """
 
     requirements_input = TextInput(
-        label="Requirements (BallName | Amount | SpecialName)",
+        label="BallName | Amount | SpecialName",
         style=discord.TextStyle.paragraph,
         placeholder=(
             "One requirement per line:\n"
