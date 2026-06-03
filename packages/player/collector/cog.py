@@ -30,6 +30,9 @@ log = logging.getLogger("ballsdex.packages.collector")
 GROUPS_PER_PAGE = 7
 REQUIREMENTS_FILE = "/code/ballsdex/packages/collector/requirements.txt"
 
+# Claimed format: {ball_id: {special_id: set(user_ids)}}
+# This allows tracking claims per ball+special combination
+
 
 # ── Persistence ───────────────────────────────────────────────────────────────
 
@@ -511,48 +514,60 @@ class CollectorCog(commands.Cog):
 
         ball = countryball
         ball_id = ball.pk
-        reqs = _get_reqs(self.bot, ball_id)
-
-        if not reqs:
+        raw = self.bot.collector_requirements.get(ball_id)
+        if not raw:
             await interaction.followup.send(
                 f"There is no collector requirement set for **{ball.country}**.", ephemeral=True
             )
             return
 
+        reqs: list[dict] = [raw] if isinstance(raw, dict) else raw
         player, _ = await Player.get_or_create(discord_id=interaction.user.id)
         count = await BallInstance.filter(player=player, ball=ball, deleted=False).count()
 
-        # Filter to requirements the user meets and hasn't claimed yet
-        eligible = [
-            r for r in reqs
-            if count >= r["amount"] and not _has_claimed(self.bot, interaction.user.id, ball_id, r["special_id"])
-        ]
+        BAR_LEN = 7
+        BAR_FILL = "█"
+        BAR_EMPTY = "░"
+
+        def make_bar(current: int, required: int) -> str:
+            ratio = min(current / required, 1.0)
+            filled = round(BAR_LEN * ratio)
+            pct = round(100 * current / required)
+            return f"[{BAR_FILL * filled}{BAR_EMPTY * (BAR_LEN - filled)}] {current}/{required} {pct}%"
+
+        # Build progress display
+        lines = [f"Collector requirements for **{ball.country}**"]
+        eligible: list[dict] = []
+        already_claimed: list[dict] = []
+
+        for r in sorted(reqs, key=lambda x: x["amount"]):
+            bar = make_bar(count, r["amount"])
+            claimed = _has_claimed(self.bot, interaction.user.id, ball_id, r["special_id"])
+            lines.append(f"{r['special_name']} - {bar}")
+            if not claimed and count >= r["amount"]:
+                eligible.append(r)
+            if claimed:
+                already_claimed.append(r)
+
+        progress_text = "\n".join(lines)
 
         if not eligible:
-            # Check if they meet any requirement count-wise
-            meets_count = [r for r in reqs if count >= r["amount"]]
-            if not meets_count:
-                min_needed = min(r["amount"] for r in reqs)
+            if already_claimed and len(already_claimed) == len(reqs):
                 await interaction.followup.send(
-                    f"You need at least **{min_needed}** {ball.country} {settings.plural_collectible_name} "
-                    f"but you only have **{count}**.",
+                    progress_text + "\n\nYou have already claimed all available rewards!",
                     ephemeral=True,
                 )
             else:
-                await interaction.followup.send(
-                    f"You have already claimed all available collector rewards for **{ball.country}**!",
-                    ephemeral=True,
-                )
+                await interaction.followup.send(progress_text, ephemeral=True)
             return
 
         if len(eligible) == 1:
-            # Single eligible requirement — claim directly
+            await interaction.followup.send(progress_text, ephemeral=True)
             await _do_claim(self.bot, interaction, ball, player, eligible[0])
         else:
-            # Multiple eligible — show buttons to pick
             view = ClaimSelectView(self.bot, interaction, ball, player, count, eligible)
             await interaction.followup.send(
-                f"You qualify for multiple **{ball.country}** collector rewards! Pick one:",
+                progress_text + "\n\nYou qualify for multiple rewards! Pick one:",
                 view=view,
                 ephemeral=True,
             )
@@ -579,9 +594,11 @@ class CollectorCog(commands.Cog):
             )
             return
 
-        # Flatten all requirements into a single list
+        # Flatten all requirements — handle both old dict and new list format
         all_reqs: list[dict] = []
         for reqs in requirements.values():
+            if isinstance(reqs, dict):
+                reqs = [reqs]
             for r in reqs:
                 if special is None or r["special_name"].lower() == special.strip().lower():
                     all_reqs.append(r)
