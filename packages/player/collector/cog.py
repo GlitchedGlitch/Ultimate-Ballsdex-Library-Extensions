@@ -632,10 +632,9 @@ class CollectorCog(commands.Cog):
             entries.append((f"Minimum: {amount}", field_value))
 
         total_pages = -(-len(entries) // GROUPS_PER_PAGE)
-        if special:
 
         source = FieldPageSource(entries, per_page=GROUPS_PER_PAGE, inline=False)
-        source.embed.title = "Collector List"
+        source.embed.title = f"{special.strip()} Collector List" if special else "Collector List"
         source.embed.color = discord.Color.gold()
 
         pages = Pages(source, interaction=interaction)
