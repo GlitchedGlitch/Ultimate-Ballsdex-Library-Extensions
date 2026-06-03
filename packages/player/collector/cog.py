@@ -576,8 +576,8 @@ class CollectorCog(commands.Cog):
 
     @collector_group.command(name="list", description="List all active collector requirements")
     @app_commands.describe(
-        reverse="Reverse the output of the list",
         special="Filter by special name",
+        reverse="Reverse the output of the list",
     )
     async def collector_list(
         self,
