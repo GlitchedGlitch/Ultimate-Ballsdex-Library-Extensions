@@ -582,8 +582,8 @@ class CollectorCog(commands.Cog):
     async def collector_list(
         self,
         interaction: discord.Interaction["BallsDexBot"],
-        reverse: bool = False,
         special: str | None = None,
+        reverse: bool = False,
     ):
         await interaction.response.defer(ephemeral=True)
 
