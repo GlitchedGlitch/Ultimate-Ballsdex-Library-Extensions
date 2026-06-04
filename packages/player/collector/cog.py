@@ -29,9 +29,7 @@ log = logging.getLogger("ballsdex.packages.collector")
 
 GROUPS_PER_PAGE = 7
 REQUIREMENTS_FILE = "/code/ballsdex/packages/collector/requirements.txt"
-
-# Claimed format: {ball_id: {special_id: set(user_ids)}}
-# This allows tracking claims per ball+special combination
+CLAIMS_FILE = "/code/ballsdex/packages/collector/claims.txt"
 
 
 # ── Persistence ───────────────────────────────────────────────────────────────
@@ -64,7 +62,39 @@ def _load_requirements() -> dict[int, list[dict]]:
         return {}
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+def _save_claims(claimed: dict[str, list[int]]) -> None:
+    """Save claims to disk. Converts sets to lists for JSON."""
+    try:
+        serializable = {k: list(v) for k, v in claimed.items()}
+        with open(CLAIMS_FILE, "w") as f:
+            json.dump(serializable, f, indent=2)
+    except Exception:
+        log.warning("Could not save claims.txt", exc_info=True)
+
+
+def _load_claims() -> dict[str, set[int]]:
+    """
+    Load claims from disk.
+    Supports both new format {"ball_id:special_id": [user_ids]}
+    and old format {"ball_id": [user_ids]} (migrates automatically).
+    """
+    if not os.path.isfile(CLAIMS_FILE):
+        return {}
+    try:
+        with open(CLAIMS_FILE, "r") as f:
+            raw = json.load(f)
+        result: dict[str, set[int]] = {}
+        for k, v in raw.items():
+            # Old format had plain ball_id as key — skip, can't migrate without special_id
+            if ":" in str(k):
+                result[str(k)] = set(int(u) for u in v)
+        return result
+    except Exception:
+        log.warning("Could not load claims.txt", exc_info=True)
+        return {}
+
+
+
 
 def _ball_emoji(bot: "BallsDexBot", ball_id: int) -> str:
     ball = balls_cache.get(ball_id)
@@ -106,6 +136,7 @@ def _has_claimed(bot: "BallsDexBot", user_id: int, ball_id: int, special_id: int
 def _mark_claimed(bot: "BallsDexBot", user_id: int, ball_id: int, special_id: int) -> None:
     key = _claimed_key(ball_id, special_id)
     bot.collector_claimed.setdefault(key, set()).add(user_id)
+    _save_claims(bot.collector_claimed)
 
 
 # ── Claim view (multi-requirement) ────────────────────────────────────────────
@@ -187,6 +218,16 @@ async def _do_claim(
         server_id=interaction.guild_id,
     )
     _mark_claimed(bot, interaction.user.id, ball_id, special_id)
+
+    log.info(
+        "User %s claimed collector %s / special %s (#%X)",
+        interaction.user, ball.country, special.name, new_instance.pk,
+    )
+    await log_action(
+        f"{interaction.user.name} claimed {ball.country} `(#{new_instance.pk:0X})`. "
+        f"(Special={special.name} ATK={new_instance.attack_bonus:+d} HP={new_instance.health_bonus:+d})",
+        interaction.client,
+    )
 
     emoji_str = special.emoji or ""
     await interaction.followup.send(
@@ -483,8 +524,8 @@ class CollectorCog(commands.Cog):
         if not hasattr(bot, "collector_requirements"):
             bot.collector_requirements: dict[int, list[dict]] = _load_requirements()
         if not hasattr(bot, "collector_claimed"):
-            # {f"{ball_id}:{special_id}": set(user_ids)}
-            bot.collector_claimed: dict[str, set[int]] = {}
+            # {f"{ball_id}:{special_id}": set(user_ids)} — persisted to claims.txt
+            bot.collector_claimed: dict[str, set[int]] = _load_claims()
 
     collector_group = app_commands.Group(
         name="collector",
@@ -601,7 +642,7 @@ class CollectorCog(commands.Cog):
 
         all_reqs.sort(key=lambda r: r["amount"], reverse=reverse)
 
-        # Group by amount
+        # Group by amount — split oversized groups across multiple entries
         grouped: dict[int, list[dict]] = defaultdict(list)
         for r in all_reqs:
             grouped[r["amount"]].append(r)
@@ -610,18 +651,30 @@ class CollectorCog(commands.Cog):
         for amount in grouped:
             reqs_in_group = grouped[amount]
             lines: list[str] = []
+            chunk_lines: list[str] = []
+            chunk_num = 1
+
             for r in reqs_in_group:
                 emoji = _ball_emoji(self.bot, r["ball_id"])
-                lines.append(f"* {emoji} {r['ball_name']} → *{r['special_name']}*")
+                if special:
+                    line = f"* {emoji} {r['ball_name']}"
+                else:
+                    line = f"* {emoji} {r['ball_name']} → *{r['special_name']}*"
 
-            # Truncate field value to Discord's 1024 char limit
-            field_value = "\n".join(lines)
-            if len(field_value) > 1020:
-                field_value = field_value[:1020] + "\n..."
+                # Check if adding this line would exceed Discord's 1024 char field limit
+                test = "\n".join(chunk_lines + [line])
+                if len(test) > 1000 and chunk_lines:
+                    # Save current chunk and start a new one
+                    label = f"Minimum: {amount}" if chunk_num == 1 else f"Minimum: {amount} (cont.)"
+                    entries.append((label, "\n".join(chunk_lines)))
+                    chunk_lines = [line]
+                    chunk_num += 1
+                else:
+                    chunk_lines.append(line)
 
-            entries.append((f"Minimum: {amount}", field_value))
-
-        total_pages = -(-len(entries) // GROUPS_PER_PAGE)
+            if chunk_lines:
+                label = f"Minimum: {amount}" if chunk_num == 1 else f"Minimum: {amount} (cont.)"
+                entries.append((label, "\n".join(chunk_lines)))
 
         source = FieldPageSource(entries, per_page=GROUPS_PER_PAGE, inline=False)
         source.embed.title = f"{special.strip()} Collector List" if special else "Collector List"
