@@ -219,16 +219,6 @@ async def _do_claim(
     )
     _mark_claimed(bot, interaction.user.id, ball_id, special_id)
 
-    log.info(
-        "User %s claimed collector %s / special %s (#%X)",
-        interaction.user, ball.country, special.name, new_instance.pk,
-    )
-    await log_action(
-        f"{interaction.user.name} claimed {ball.country} `(#{new_instance.pk:0X})`. "
-        f"(Special={special.name} ATK={new_instance.attack_bonus:+d} HP={new_instance.health_bonus:+d})",
-        interaction.client,
-    )
-
     emoji_str = special.emoji or ""
     await interaction.followup.send(
         f"Congratulations! You claimed **{emoji_str} {special.name} {ball.country}** "
