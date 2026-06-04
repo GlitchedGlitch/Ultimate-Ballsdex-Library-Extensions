@@ -632,7 +632,7 @@ class CollectorCog(commands.Cog):
 
         all_reqs.sort(key=lambda r: r["amount"], reverse=reverse)
 
-        # Group by amount — split oversized groups across multiple entries
+        # Group by amount - split oversized groups across multiple entries meow
         grouped: dict[int, list[dict]] = defaultdict(list)
         for r in all_reqs:
             grouped[r["amount"]].append(r)
@@ -640,34 +640,28 @@ class CollectorCog(commands.Cog):
         entries: list[tuple[str, str]] = []
         for amount in grouped:
             reqs_in_group = grouped[amount]
-            lines: list[str] = []
             chunk_lines: list[str] = []
             chunk_num = 1
 
             for r in reqs_in_group:
                 emoji = _ball_emoji(self.bot, r["ball_id"])
-                if special:
-                    line = f"* {emoji} {r['ball_name']}"
-                else:
-                    line = f"* {emoji} {r['ball_name']} → *{r['special_name']}*"
+                line = f"* {emoji} {r['ball_name']}" if special else f"* {emoji} {r['ball_name']} -> *{r['special_name']}*"
 
-                # Check if adding this line would exceed Discord's 1024 char field limit
-                test = "\n".join(chunk_lines + [line])
-                if len(test) > 1000 and chunk_lines:
-                    # Save current chunk and start a new one
-                    label = f"Minimum: {amount}" if chunk_num == 1 else f"Minimum: {amount} (cont.)"
+                # If adding this line exceeds 1000 chars, flush current chunk first
+                if chunk_lines and len("\n".join(chunk_lines + [line])) > 1000:
+                    label = f"Minimum: {amount}" if chunk_num == 1 else f"Minimum: {amount} ({chunk_num})"
                     entries.append((label, "\n".join(chunk_lines)))
-                    chunk_lines = [line]
+                    chunk_lines = []
                     chunk_num += 1
-                else:
-                    chunk_lines.append(line)
+
+                chunk_lines.append(line)
 
             if chunk_lines:
-                label = f"Minimum: {amount}" if chunk_num == 1 else f"Minimum: {amount} (cont.)"
+                label = f"Minimum: {amount}" if chunk_num == 1 else f"Minimum: {amount} ({chunk_num})"
                 entries.append((label, "\n".join(chunk_lines)))
 
         source = FieldPageSource(entries, per_page=GROUPS_PER_PAGE, inline=False)
-        source.embed.title = f'"{special.strip()}" Special Collector List' if special else "Collector List"
+        source.embed.title = f'"{special.strip()}" Collector List' if special else "Collector List"
         source.embed.color = discord.Color.gold()
 
         pages = Pages(source, interaction=interaction)
