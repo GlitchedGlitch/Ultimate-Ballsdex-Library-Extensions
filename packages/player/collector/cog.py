@@ -667,7 +667,7 @@ class CollectorCog(commands.Cog):
                 entries.append((label, "\n".join(chunk_lines)))
 
         source = FieldPageSource(entries, per_page=GROUPS_PER_PAGE, inline=False)
-        source.embed.title = f"{special.strip()} Collector List" if special else "Collector List"
+        source.embed.title = f""{special.strip()}" Special Collector List" if special else "Collector List"
         source.embed.color = discord.Color.gold()
 
         pages = Pages(source, interaction=interaction)
