@@ -632,7 +632,7 @@ class CollectorCog(commands.Cog):
 
         all_reqs.sort(key=lambda r: r["amount"], reverse=reverse)
 
-        # Group by amount - split oversized groups across multiple entries meow
+        # Group by amount — split oversized groups across multiple entries
         grouped: dict[int, list[dict]] = defaultdict(list)
         for r in all_reqs:
             grouped[r["amount"]].append(r)
@@ -645,10 +645,9 @@ class CollectorCog(commands.Cog):
 
             for r in reqs_in_group:
                 emoji = _ball_emoji(self.bot, r["ball_id"])
-                line = f"* {emoji} {r['ball_name']}" if special else f"* {emoji} {r['ball_name']} -> *{r['special_name']}*"
+                line = f"* {emoji} {r['ball_name']}" if special else f"* {emoji} {r['ball_name']} → *{r['special_name']}*"
 
-                # If adding this line exceeds 1000 chars, flush current chunk first
-                if chunk_lines and len("\n".join(chunk_lines + [line])) > 1000:
+                if chunk_lines and len("\n".join(chunk_lines + [line])) > 800:
                     label = f"Minimum: {amount}" if chunk_num == 1 else f"Minimum: {amount} ({chunk_num})"
                     entries.append((label, "\n".join(chunk_lines)))
                     chunk_lines = []
@@ -660,7 +659,7 @@ class CollectorCog(commands.Cog):
                 label = f"Minimum: {amount}" if chunk_num == 1 else f"Minimum: {amount} ({chunk_num})"
                 entries.append((label, "\n".join(chunk_lines)))
 
-        source = FieldPageSource(entries, per_page=GROUPS_PER_PAGE, inline=False)
+        source = FieldPageSource(entries, per_page=3, inline=False)
         source.embed.title = f'"{special.strip()}" Collector List' if special else "Collector List"
         source.embed.color = discord.Color.gold()
 
