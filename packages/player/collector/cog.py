@@ -223,7 +223,7 @@ async def _do_claim(
     await interaction.followup.send(
         f"Congratulations! You claimed **{emoji_str} {special.name} {ball.country}** "
         f"collector {settings.collectible_name}!\n"
-        f"Added to your collection as `#{new_instance.pk:0X}`.",
+        f"Added to your collection (`#{new_instance.pk:0X}`)",
         ephemeral=True,
     )
 
@@ -309,7 +309,7 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
                     "ball_id": ball.pk, "ball_name": ball.country,
                     "amount": amount, "special_id": special.pk, "special_name": special.name,
                 })
-            added.append(f"**{ball.country}** — ≥{amount} → {special.name}")
+            added.append(f"**{ball.country}** — ≥ {amount} -> {special.name}")
 
         if added:
             _save_requirements(self.bot.collector_requirements)
@@ -378,7 +378,7 @@ class CollectorAdminGroup(app_commands.Group):
         _save_requirements(self.bot.collector_requirements)
 
         await interaction.response.send_message(
-            f"Collector requirement set: **{ball.country}** — ≥**{amount}** → **{special.name}**.",
+            f"Collector requirement set: **{ball.country}** — ≥**{amount}** -> **{special.name}**.",
             ephemeral=True,
         )
         await log_action(
@@ -495,7 +495,7 @@ class CollectorAdminGroup(app_commands.Group):
         for r in sorted(reqs, key=lambda x: x["amount"]):
             claimed_count = len(self.bot.collector_claimed.get(_claimed_key(ball.pk, r["special_id"]), set()))
             lines.append(
-                f"• ≥**{r['amount']}** → **{r['special_name']}** (ID `{r['special_id']}`) — {claimed_count} claimed"
+                f"• ≥**{r['amount']}** -> **{r['special_name']}** (ID `{r['special_id']}`) — {claimed_count} claimed"
             )
 
         await interaction.response.send_message(
@@ -645,19 +645,19 @@ class CollectorCog(commands.Cog):
 
             for r in reqs_in_group:
                 emoji = _ball_emoji(self.bot, r["ball_id"])
-                line = f"* {emoji} {r['ball_name']}" if special else f"* {emoji} {r['ball_name']} → *{r['special_name']}*"
+                line = f"* {emoji} {r['ball_name']}" if special else f"* {emoji} {r['ball_name']} -> *{r['special_name']}*"
 
                 if chunk_lines and len("\n".join(chunk_lines + [line])) > 800:
-                    label = f"Minimum: {amount}" if chunk_num == 1 else f"Minimum: {amount} ({chunk_num})"
-                    entries.append((label, "\n".join(chunk_lines)))
+                    header = f"**Minimum: {amount}**" if chunk_num == 1 else "\u200b"
+                    entries.append((header, "\n".join(chunk_lines)))
                     chunk_lines = []
                     chunk_num += 1
 
                 chunk_lines.append(line)
 
             if chunk_lines:
-                label = f"Minimum: {amount}" if chunk_num == 1 else f"Minimum: {amount} ({chunk_num})"
-                entries.append((label, "\n".join(chunk_lines)))
+                header = f"**Minimum: {amount}**" if chunk_num == 1 else "\u200b"
+                entries.append((header, "\n".join(chunk_lines)))
 
         source = FieldPageSource(entries, per_page=3, inline=False)
         source.embed.title = f'"{special.strip()}" Collector List' if special else "Collector List"
