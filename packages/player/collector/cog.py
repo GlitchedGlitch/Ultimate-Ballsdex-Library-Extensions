@@ -34,7 +34,7 @@ CLAIMS_FILE = "/code/ballsdex/packages/collector/claims.txt"
 
 # ── Persistence ───────────────────────────────────────────────────────────────
 
-def _save_requirements(requirements: dict[int, list[dict]]) -> None:
+def _save_requirements(requirements: dict) -> None:
     try:
         with open(REQUIREMENTS_FILE, "w") as f:
             json.dump(requirements, f, indent=2)
@@ -51,19 +51,14 @@ def _load_requirements() -> dict[int, list[dict]]:
         result: dict[int, list[dict]] = {}
         for k, v in raw.items():
             ball_id = int(k)
-            # Backward compat: old format was a single dict
-            if isinstance(v, dict):
-                result[ball_id] = [v]
-            else:
-                result[ball_id] = v
+            result[ball_id] = [v] if isinstance(v, dict) else v
         return result
     except Exception:
         log.warning("Could not load requirements.txt", exc_info=True)
         return {}
 
 
-def _save_claims(claimed: dict[str, list[int]]) -> None:
-    """Save claims to disk. Converts sets to lists for JSON."""
+def _save_claims(claimed: dict) -> None:
     try:
         serializable = {k: list(v) for k, v in claimed.items()}
         with open(CLAIMS_FILE, "w") as f:
@@ -73,28 +68,18 @@ def _save_claims(claimed: dict[str, list[int]]) -> None:
 
 
 def _load_claims() -> dict[str, set[int]]:
-    """
-    Load claims from disk.
-    Supports both new format {"ball_id:special_id": [user_ids]}
-    and old format {"ball_id": [user_ids]} (migrates automatically).
-    """
     if not os.path.isfile(CLAIMS_FILE):
         return {}
     try:
         with open(CLAIMS_FILE, "r") as f:
             raw = json.load(f)
-        result: dict[str, set[int]] = {}
-        for k, v in raw.items():
-            # Old format had plain ball_id as key — skip, can't migrate without special_id
-            if ":" in str(k):
-                result[str(k)] = set(int(u) for u in v)
-        return result
+        return {str(k): set(int(u) for u in v) for k, v in raw.items() if ":" in str(k)}
     except Exception:
         log.warning("Could not load claims.txt", exc_info=True)
         return {}
 
 
-
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _ball_emoji(bot: "BallsDexBot", ball_id: int) -> str:
     ball = balls_cache.get(ball_id)
@@ -121,10 +106,6 @@ async def _find_special_by_name(name: str):
     return None
 
 
-def _get_reqs(bot: "BallsDexBot", ball_id: int) -> list[dict]:
-    return bot.collector_requirements.get(ball_id, [])
-
-
 def _claimed_key(ball_id: int, special_id: int) -> str:
     return f"{ball_id}:{special_id}"
 
@@ -139,25 +120,56 @@ def _mark_claimed(bot: "BallsDexBot", user_id: int, ball_id: int, special_id: in
     _save_claims(bot.collector_claimed)
 
 
-# ── Claim view (multi-requirement) ────────────────────────────────────────────
+def _get_reqs(bot: "BallsDexBot", ball_id: int) -> list[dict]:
+    raw = bot.collector_requirements.get(ball_id, [])
+    return [raw] if isinstance(raw, dict) else raw
+
+
+# ── Claim helpers ─────────────────────────────────────────────────────────────
+
+async def _do_claim(
+    bot: "BallsDexBot",
+    interaction: discord.Interaction,
+    ball,
+    player,
+    req: dict,
+) -> None:
+    ball_id = ball.pk
+    special_id = req["special_id"]
+
+    if _has_claimed(bot, interaction.user.id, ball_id, special_id):
+        await interaction.followup.send(
+            f"You already claimed **{req['special_name']} {ball.country}**!", ephemeral=True
+        )
+        return
+
+    special = await Special.get_or_none(pk=special_id)
+    if special is None:
+        await interaction.followup.send(
+            "The reward special no longer exists. Contact an admin.", ephemeral=True
+        )
+        return
+
+    new_instance = await BallInstance.create(
+        player=player, ball=ball, special=special,
+        attack_bonus=0, health_bonus=0, server_id=interaction.guild_id,
+    )
+    _mark_claimed(bot, interaction.user.id, ball_id, special_id)
+
+    emoji_str = special.emoji or ""
+    await interaction.followup.send(
+        f"Congratulations! You claimed **{emoji_str} {special.name} {ball.country}** "
+        f"collector {settings.collectible_name}!\n"
+        f"Added to your collection as `#{new_instance.pk:0X}`.",
+        ephemeral=True,
+    )
+
 
 class ClaimSelectView(discord.ui.View):
-    def __init__(
-        self,
-        bot: "BallsDexBot",
-        interaction: discord.Interaction,
-        ball,
-        player: "Player",
-        count: int,
-        eligible: list[dict],
-    ):
+    def __init__(self, bot, interaction, ball, player, eligible):
         super().__init__(timeout=60)
         self.bot = bot
         self.original = interaction
-        self.ball = ball
-        self.player = player
-        self.count = count
-
         for req in eligible:
             btn = discord.ui.Button(
                 label=f"{req['special_name']} — {req['amount']}",
@@ -165,7 +177,7 @@ class ClaimSelectView(discord.ui.View):
             )
             async def callback(itx: discord.Interaction, r=req):
                 await itx.response.defer(ephemeral=True)
-                await _do_claim(self.bot, itx, self.ball, self.player, r)
+                await _do_claim(self.bot, itx, ball, player, r)
                 self.stop()
             btn.callback = callback
             self.add_item(btn)
@@ -183,49 +195,6 @@ class ClaimSelectView(discord.ui.View):
             await self.original.edit_original_response(view=self)
         except Exception:
             pass
-
-
-async def _do_claim(
-    bot: "BallsDexBot",
-    interaction: discord.Interaction,
-    ball,
-    player: "Player",
-    req: dict,
-) -> None:
-    ball_id = ball.pk
-    special_id = req["special_id"]
-
-    if _has_claimed(bot, interaction.user.id, ball_id, special_id):
-        await interaction.followup.send(
-            f"You already claimed **{req['special_name']} {ball.country}**!",
-            ephemeral=True,
-        )
-        return
-
-    special = await Special.get_or_none(pk=special_id)
-    if special is None:
-        await interaction.followup.send(
-            "The reward special no longer exists. Contact an admin.", ephemeral=True
-        )
-        return
-
-    new_instance = await BallInstance.create(
-        player=player,
-        ball=ball,
-        special=special,
-        attack_bonus=0,
-        health_bonus=0,
-        server_id=interaction.guild_id,
-    )
-    _mark_claimed(bot, interaction.user.id, ball_id, special_id)
-
-    emoji_str = special.emoji or ""
-    await interaction.followup.send(
-        f"Congratulations! You claimed **{emoji_str} {special.name} {ball.country}** "
-        f"collector {settings.collectible_name}!\n"
-        f"Added to your collection (`#{new_instance.pk:0X}`)",
-        ephemeral=True,
-    )
 
 
 # ── Bulk modal ────────────────────────────────────────────────────────────────
@@ -296,7 +265,6 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
                 continue
 
             reqs = self.bot.collector_requirements.setdefault(ball.pk, [])
-            # Replace existing entry for same ball+special, otherwise append
             for i, r in enumerate(reqs):
                 if r["special_id"] == special.pk:
                     reqs[i] = {
@@ -309,7 +277,7 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
                     "ball_id": ball.pk, "ball_name": ball.country,
                     "amount": amount, "special_id": special.pk, "special_name": special.name,
                 })
-            added.append(f"**{ball.country}** — ≥ {amount} -> {special.name}")
+            added.append(f"**{ball.country}** — ≥{amount} → {special.name}")
 
         if added:
             _save_requirements(self.bot.collector_requirements)
@@ -378,7 +346,7 @@ class CollectorAdminGroup(app_commands.Group):
         _save_requirements(self.bot.collector_requirements)
 
         await interaction.response.send_message(
-            f"Collector requirement set: **{ball.country}** — ≥**{amount}** -> **{special.name}**.",
+            f"Collector requirement set: **{ball.country}** — ≥**{amount}** → **{special.name}**.",
             ephemeral=True,
         )
         await log_action(
@@ -406,6 +374,8 @@ class CollectorAdminGroup(app_commands.Group):
     ):
         ball = countryball
         reqs = self.bot.collector_requirements.get(ball.pk, [])
+        if isinstance(reqs, dict):
+            reqs = [reqs]
         if not reqs:
             await interaction.response.send_message(
                 f"No collector requirement exists for **{ball.country}**.", ephemeral=True
@@ -413,11 +383,8 @@ class CollectorAdminGroup(app_commands.Group):
             return
 
         if special is None:
-            # Delete all requirements for this ball
             del self.bot.collector_requirements[ball.pk]
-            # Clear all claims for this ball
-            keys_to_del = [k for k in self.bot.collector_claimed if k.startswith(f"{ball.pk}:")]
-            for k in keys_to_del:
+            for k in [k for k in self.bot.collector_claimed if k.startswith(f"{ball.pk}:")]:
                 del self.bot.collector_claimed[k]
             _save_requirements(self.bot.collector_requirements)
             await interaction.response.send_message(
@@ -429,7 +396,6 @@ class CollectorAdminGroup(app_commands.Group):
             )
             return
 
-        # Delete specific special by name or ID from autocomplete
         special_lower = special.strip().lower()
         new_reqs = [r for r in reqs if r["special_name"].lower() != special_lower and str(r["special_id"]) != special]
         if len(new_reqs) == len(reqs):
@@ -445,8 +411,7 @@ class CollectorAdminGroup(app_commands.Group):
             del self.bot.collector_requirements[ball.pk]
 
         for r in removed:
-            key = _claimed_key(ball.pk, r["special_id"])
-            self.bot.collector_claimed.pop(key, None)
+            self.bot.collector_claimed.pop(_claimed_key(ball.pk, r["special_id"]), None)
 
         _save_requirements(self.bot.collector_requirements)
         names = ", ".join(r["special_name"] for r in removed)
@@ -465,10 +430,10 @@ class CollectorAdminGroup(app_commands.Group):
         interaction: discord.Interaction["BallsDexBot"],
         current: str,
     ) -> list[app_commands.Choice[str]]:
-        # Try to find which ball was selected from the other param
-        # We can't easily cross-reference, so show all specials in use
         seen: dict[str, str] = {}
         for reqs in self.bot.collector_requirements.values():
+            if isinstance(reqs, dict):
+                reqs = [reqs]
             for r in reqs:
                 name = r["special_name"]
                 if current.lower() in name.lower():
@@ -484,7 +449,7 @@ class CollectorAdminGroup(app_commands.Group):
         countryball: BallTransform,
     ):
         ball = countryball
-        reqs = self.bot.collector_requirements.get(ball.pk, [])
+        reqs = _get_reqs(self.bot, ball.pk)
         if not reqs:
             await interaction.response.send_message(
                 f"No collector requirement exists for **{ball.country}**.", ephemeral=True
@@ -494,17 +459,12 @@ class CollectorAdminGroup(app_commands.Group):
         lines = []
         for r in sorted(reqs, key=lambda x: x["amount"]):
             claimed_count = len(self.bot.collector_claimed.get(_claimed_key(ball.pk, r["special_id"]), set()))
-            lines.append(
-                f"• ≥**{r['amount']}** -> **{r['special_name']}** (ID `{r['special_id']}`) — {claimed_count} claimed"
-            )
+            lines.append(f"• ≥**{r['amount']}** → **{r['special_name']}** (ID `{r['special_id']}`) — {claimed_count} claimed")
 
         await interaction.response.send_message(
             f"**Collector Requirements — {ball.country}**\n" + "\n".join(lines),
             ephemeral=True,
         )
-
-
-# ── Player-facing cog ─────────────────────────────────────────────────────────
 
 class CollectorCog(commands.Cog):
     """Collector package"""
@@ -514,7 +474,6 @@ class CollectorCog(commands.Cog):
         if not hasattr(bot, "collector_requirements"):
             bot.collector_requirements: dict[int, list[dict]] = _load_requirements()
         if not hasattr(bot, "collector_claimed"):
-            # {f"{ball_id}:{special_id}": set(user_ids)} — persisted to claims.txt
             bot.collector_claimed: dict[str, set[int]] = _load_claims()
 
     collector_group = app_commands.Group(
@@ -525,25 +484,76 @@ class CollectorCog(commands.Cog):
     # ── /collector claim ──────────────────────────────────────────────────────
 
     @collector_group.command(name="claim", description="Claim your collector ball reward")
-    @app_commands.describe(countryball=f"The {settings.collectible_name} you want to claim")
+    @app_commands.describe(countryball=f"The {settings.collectible_name} to claim (leave empty to see what you can claim)")
     async def collector_claim(
         self,
         interaction: discord.Interaction["BallsDexBot"],
-        countryball: BallTransform,
+        countryball: BallTransform | None = None,
     ):
         await interaction.response.defer(ephemeral=True)
 
+        player, _ = await Player.get_or_create(discord_id=interaction.user.id)
+        if countryball is None:
+            requirements = self.bot.collector_requirements
+            if not requirements:
+                await interaction.followup.send(
+                    "There are no collector requirements set up yet.", ephemeral=True
+                )
+                return
+
+            claimable: list[str] = []
+            in_progress: list[str] = []
+
+            for ball_id, raw_reqs in requirements.items():
+                reqs = [raw_reqs] if isinstance(raw_reqs, dict) else raw_reqs
+                ball = balls_cache.get(ball_id)
+                if not ball:
+                    continue
+
+                count = await BallInstance.filter(player=player, ball_id=ball_id, deleted=False).count()
+                emoji = _ball_emoji(self.bot, ball_id)
+
+                for r in sorted(reqs, key=lambda x: x["amount"]):
+                    if _has_claimed(self.bot, interaction.user.id, ball_id, r["special_id"]):
+                        continue
+                    if count >= r["amount"]:
+                        claimable.append(f"• {emoji} **{ball.country}** — {r['special_name']} ✅ ready")
+                    else:
+                        pct = round(100 * count / r["amount"])
+                        claimable_at = r["amount"]
+                        in_progress.append(f"• {emoji} **{ball.country}** — {r['special_name']} ({count}/{claimable_at} · {pct}%)")
+
+            if not claimable and not in_progress:
+                await interaction.followup.send(
+                    "You have already claimed all available collector rewards!", ephemeral=True
+                )
+                return
+
+            lines: list[str] = []
+            if claimable:
+                lines.append("**Ready to claim:**")
+                lines.extend(claimable[:20])
+                if len(claimable) > 20:
+                    lines.append(f"*...and {len(claimable) - 20} more*")
+            if in_progress:
+                lines.append("\n**In progress:**")
+                lines.extend(in_progress[:20])
+                if len(in_progress) > 20:
+                    lines.append(f"*...and {len(in_progress) - 20} more*")
+
+            lines.append(f"\nUse `/collector claim {settings.collectible_name}:` to claim a specific ball.")
+            await interaction.followup.send("\n".join(lines), ephemeral=True)
+            return
         ball = countryball
         ball_id = ball.pk
-        raw = self.bot.collector_requirements.get(ball_id)
-        if not raw:
+        reqs = _get_reqs(self.bot, ball_id)
+
+        if not reqs:
             await interaction.followup.send(
                 f"There is no collector requirement set for **{ball.country}**.", ephemeral=True
             )
             return
 
-        reqs: list[dict] = [raw] if isinstance(raw, dict) else raw
-        player, _ = await Player.get_or_create(discord_id=interaction.user.id)
         count = await BallInstance.filter(player=player, ball=ball, deleted=False).count()
 
         BAR_LEN = 7
@@ -556,10 +566,8 @@ class CollectorCog(commands.Cog):
             pct = round(100 * current / required)
             return f"[{BAR_FILL * filled}{BAR_EMPTY * (BAR_LEN - filled)}] {current}/{required} {pct}%"
 
-        # Build progress display
         lines = [f"Collector requirements for **{ball.country}**"]
         eligible: list[dict] = []
-        already_claimed: list[dict] = []
 
         for r in sorted(reqs, key=lambda x: x["amount"]):
             bar = make_bar(count, r["amount"])
@@ -567,26 +575,18 @@ class CollectorCog(commands.Cog):
             lines.append(f"{r['special_name']} - {bar}")
             if not claimed and count >= r["amount"]:
                 eligible.append(r)
-            if claimed:
-                already_claimed.append(r)
 
         progress_text = "\n".join(lines)
 
         if not eligible:
-            if already_claimed and len(already_claimed) == len(reqs):
-                await interaction.followup.send(
-                    progress_text + "\n\nYou have already claimed all available rewards!",
-                    ephemeral=True,
-                )
-            else:
-                await interaction.followup.send(progress_text, ephemeral=True)
+            await interaction.followup.send(progress_text, ephemeral=True)
             return
 
         if len(eligible) == 1:
             await interaction.followup.send(progress_text, ephemeral=True)
             await _do_claim(self.bot, interaction, ball, player, eligible[0])
         else:
-            view = ClaimSelectView(self.bot, interaction, ball, player, count, eligible)
+            view = ClaimSelectView(self.bot, interaction, ball, player, eligible)
             await interaction.followup.send(
                 progress_text + "\n\nYou qualify for multiple rewards! Pick one:",
                 view=view,
@@ -615,7 +615,6 @@ class CollectorCog(commands.Cog):
             )
             return
 
-        # Flatten all requirements — handle both old dict and new list format
         all_reqs: list[dict] = []
         for reqs in requirements.values():
             if isinstance(reqs, dict):
@@ -632,29 +631,23 @@ class CollectorCog(commands.Cog):
 
         all_reqs.sort(key=lambda r: r["amount"], reverse=reverse)
 
-        # Group by amount — split oversized groups across multiple entries
         grouped: dict[int, list[dict]] = defaultdict(list)
         for r in all_reqs:
             grouped[r["amount"]].append(r)
 
         entries: list[tuple[str, str]] = []
         for amount in grouped:
-            reqs_in_group = grouped[amount]
             chunk_lines: list[str] = []
             chunk_num = 1
-
-            for r in reqs_in_group:
+            for r in grouped[amount]:
                 emoji = _ball_emoji(self.bot, r["ball_id"])
-                line = f"* {emoji} {r['ball_name']}" if special else f"* {emoji} {r['ball_name']} -> *{r['special_name']}*"
-
+                line = f"* {emoji} {r['ball_name']}" if special else f"* {emoji} {r['ball_name']} → *{r['special_name']}*"
                 if chunk_lines and len("\n".join(chunk_lines + [line])) > 800:
                     header = f"**Minimum: {amount}**" if chunk_num == 1 else "\u200b"
                     entries.append((header, "\n".join(chunk_lines)))
                     chunk_lines = []
                     chunk_num += 1
-
                 chunk_lines.append(line)
-
             if chunk_lines:
                 header = f"**Minimum: {amount}**" if chunk_num == 1 else "\u200b"
                 entries.append((header, "\n".join(chunk_lines)))
@@ -674,6 +667,8 @@ class CollectorCog(commands.Cog):
     ) -> list[app_commands.Choice[str]]:
         seen: dict[str, str] = {}
         for reqs in self.bot.collector_requirements.values():
+            if isinstance(reqs, dict):
+                reqs = [reqs]
             for r in reqs:
                 name = r["special_name"]
                 if current.lower() in name.lower():
