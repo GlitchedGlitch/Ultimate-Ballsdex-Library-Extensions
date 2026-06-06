@@ -11,13 +11,13 @@ class CollectorRequirement(models.Model):
     ball = models.ForeignKey(
         "bd_models.Ball",
         on_delete=models.CASCADE,
-        related_name="collector_requirements",
+        related_name="+",
         verbose_name="Collectible",
     )
     special = models.ForeignKey(
         "bd_models.Special",
         on_delete=models.CASCADE,
-        related_name="collector_requirements",
+        related_name="+",
         verbose_name="Reward special",
         help_text="The special applied to the claimed collector ball instance.",
     )
