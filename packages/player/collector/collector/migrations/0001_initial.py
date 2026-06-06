@@ -14,9 +14,21 @@ class Migration(migrations.Migration):
             name="CollectorRequirement",
             fields=[
                 ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
-                ("amount", models.PositiveIntegerField(help_text="Minimum number of this ball the player must own to claim.")),
-                ("ball", models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name="collector_requirements", to="bd_models.ball", verbose_name="Collectible")),
-                ("special", models.ForeignKey(help_text="The special applied to the claimed collector ball instance.", on_delete=django.db.models.deletion.CASCADE, related_name="collector_requirements", to="bd_models.special", verbose_name="Reward special")),
+                ("amount", models.PositiveIntegerField(
+                    help_text="Minimum number of this ball the player must own to claim."
+                )),
+                ("ball", models.ForeignKey(
+                    on_delete=django.db.models.deletion.CASCADE,
+                    related_name="+",
+                    to="bd_models.ball",
+                    verbose_name="Collectible",
+                )),
+                ("special", models.ForeignKey(
+                    on_delete=django.db.models.deletion.CASCADE,
+                    related_name="+",
+                    to="bd_models.special",
+                    verbose_name="Reward special",
+                )),
             ],
             options={
                 "verbose_name": "Collector Requirement",
@@ -30,9 +42,24 @@ class Migration(migrations.Migration):
             fields=[
                 ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
                 ("claimed_at", models.DateTimeField(auto_now_add=True)),
-                ("ball_instance", models.OneToOneField(blank=True, help_text="The BallInstance awarded on claim.", null=True, on_delete=django.db.models.deletion.SET_NULL, related_name="collector_claim", to="bd_models.ballinstance")),
-                ("player", models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name="collector_claims", to="bd_models.player")),
-                ("requirement", models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name="claims", to="collector.collectorrequirement")),
+                ("ball_instance", models.OneToOneField(
+                    blank=True,
+                    null=True,
+                    on_delete=django.db.models.deletion.SET_NULL,
+                    related_name="collector_claim",
+                    to="bd_models.ballinstance",
+                    help_text="The BallInstance awarded on claim.",
+                )),
+                ("player", models.ForeignKey(
+                    on_delete=django.db.models.deletion.CASCADE,
+                    related_name="+",
+                    to="bd_models.player",
+                )),
+                ("requirement", models.ForeignKey(
+                    on_delete=django.db.models.deletion.CASCADE,
+                    related_name="claims",
+                    to="collector.collectorrequirement",
+                )),
             ],
             options={
                 "verbose_name": "Collector Claim",
