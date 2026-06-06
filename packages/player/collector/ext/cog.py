@@ -1,186 +1,498 @@
+"""
+Collector package for BallsDex v3 :DD
+"""
+
 from __future__ import annotations
-import json, logging, os
+
+import logging
+from collections import defaultdict
 from typing import TYPE_CHECKING
+
 import discord
 from discord import app_commands
 from discord.ext import commands
-from bd_models.models import BallInstance, Ball, Player, Special
+from discord.ui import Modal, TextInput
+
+from bd_models.models import Ball, BallInstance, Player, balls as balls_cache
+from collector.models import CollectorClaim, CollectorRequirement
 from settings.models import settings
 
 if TYPE_CHECKING:
     from ballsdex.core.bot import BallsDexBot
 
 log = logging.getLogger("ballsdex.packages.collector")
-REQUIREMENTS_FILE = os.path.join(os.path.dirname(__file__), "requirements.json")
+Interaction = discord.Interaction["BallsDexBot"]
 
 
-def _save(req: dict) -> None:
-    try:
-        with open(REQUIREMENTS_FILE, "w") as f:
-            json.dump(req, f, indent=2)
-    except Exception:
-        log.warning("Could not save requirements.json", exc_info=True)
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
-
-def _load() -> dict:
-    if not os.path.isfile(REQUIREMENTS_FILE):
-        return {}
-    try:
-        with open(REQUIREMENTS_FILE) as f:
-            return {int(k): v for k, v in json.load(f).items()}
-    except Exception:
-        log.warning("Could not load requirements.json", exc_info=True)
-        return {}
-
-
-def _emoji(bot, ball_id: int) -> str:
-    from ballsdex.core.models import balls as cache
-    b = cache.get(ball_id)
-    if b and b.emoji_id:
-        e = bot.get_emoji(b.emoji_id)
-        if e:
-            return str(e)
+def _ball_emoji(bot: "BallsDexBot", ball_id: int) -> str:
+    ball = balls_cache.get(ball_id)
+    if ball and ball.emoji_id:
+        emoji = bot.get_emoji(ball.emoji_id)
+        if emoji:
+            return str(emoji)
     return "•"
 
 
-def _admin_check():
-    async def predicate(ctx: commands.Context) -> bool:
-        from ballsdex.core.utils import checks
+async def _get_reqs(ball_id: int) -> list[CollectorRequirement]:
+    return [
+        r async for r in
+        CollectorRequirement.objects.filter(ball_id=ball_id)
+        .select_related("special")
+        .order_by("amount")
+        .aiterator()
+    ]
+
+
+async def _has_claimed(player: Player, req: CollectorRequirement) -> bool:
+    return await CollectorClaim.objects.filter(
+        player=player, requirement=req
+    ).aexists()
+
+
+async def _count_owned(player: Player, ball_id: int) -> int:
+    return await BallInstance.objects.filter(
+        player=player, ball_id=ball_id, deleted=False
+    ).acount()
+
+
+# ── Claim helpers ─────────────────────────────────────────────────────────────
+
+async def _do_claim(
+    interaction: Interaction,
+    ball: Ball,
+    player: Player,
+    req: CollectorRequirement,
+) -> None:
+    if await _has_claimed(player, req):
+        await interaction.followup.send(
+            f"You already claimed **{req.special.name} {ball.country}**!",
+            ephemeral=True,
+        )
+        return
+
+    new_instance = await BallInstance.objects.acreate(
+        player=player,
+        ball=ball,
+        special=req.special,
+        attack_bonus=0,
+        health_bonus=0,
+        server_id=interaction.guild_id,
+    )
+    await CollectorClaim.objects.acreate(
+        player=player,
+        requirement=req,
+        ball_instance=new_instance,
+    )
+
+    emoji_str = req.special.emoji or ""
+    log.info(
+        f"Player {player.discord_id} claimed {req.special.name} {ball.country} "
+        f"(#{new_instance.pk:0X})",
+        extra={"webhook": True},
+    )
+    await interaction.followup.send(
+        f"Congratulations! You claimed **{emoji_str} {req.special.name} {ball.country}** "
+        f"collector {settings.collectible_name}!\n"
+        f"Added to your collection as `#{new_instance.pk:0X}`.",
+        ephemeral=True,
+    )
+
+
+class ClaimSelectView(discord.ui.View):
+    """Shown when a player qualifies for multiple rewards on the same ball."""
+
+    def __init__(
+        self,
+        interaction: Interaction,
+        ball: Ball,
+        player: Player,
+        eligible: list[CollectorRequirement],
+    ):
+        super().__init__(timeout=60)
+        self.original = interaction
+        for req in eligible:
+            btn = discord.ui.Button(
+                label=f"{req.special.name} — ≥{req.amount:,}",
+                style=discord.ButtonStyle.primary,
+            )
+
+            async def callback(itx: Interaction, r: CollectorRequirement = req):
+                await itx.response.defer(ephemeral=True)
+                await _do_claim(itx, ball, player, r)
+                self.stop()
+
+            btn.callback = callback
+            self.add_item(btn)
+
+    async def interaction_check(self, interaction: Interaction) -> bool:
+        if interaction.user.id != self.original.user.id:
+            await interaction.response.send_message(
+                "This menu is not for you.", ephemeral=True
+            )
+            return False
+        return True
+
+    async def on_timeout(self):
+        for c in self.children:
+            c.disabled = True  # type: ignore
         try:
-            await checks.has_permissions("bd_models.add_ballinstance")(ctx)
-            return True
+            await self.original.edit_original_response(view=self)
         except Exception:
             pass
-        if ctx.guild and ctx.guild.owner_id == ctx.author.id:
-            return True
-        raise commands.CheckFailure("You do not have permission to use this command.")
-    return commands.check(predicate)
 
 
-class CollectorAdminCog(commands.Cog):
-    def __init__(self, bot: "BallsDexBot"):
-        self.bot = bot
-        super().__init__()
+# ── Bulk modal ────────────────────────────────────────────────────────────────
 
-    @commands.hybrid_command(name="collector-set")
-    @app_commands.describe(countryball="Ball to set requirement for", amount="Minimum owned", special="Reward special")
-    @_admin_check()
-    async def collector_set(self, ctx: commands.Context, countryball: str, amount: app_commands.Range[int, 1, 9999], special: str):
-        """Set or update a collector requirement"""
-        ball = None
-        async for b in Ball.objects.filter(enabled=True):
-            if b.country.lower() == countryball.lower():
-                ball = b; break
-        if not ball:
-            return await ctx.send(f"No ball matching `{countryball}`.", ephemeral=True)
-        sp = None
-        async for s in Special.objects.all():
-            if s.name.lower() == special.lower():
-                sp = s; break
-        if not sp:
-            return await ctx.send(f"No special matching `{special}`.", ephemeral=True)
-        self.bot.collector_requirements[ball.pk] = {"ball_id": ball.pk, "ball_name": ball.country, "amount": amount, "special_id": sp.pk, "special_name": sp.name}
-        self.bot.collector_claimed.pop(ball.pk, None)
-        _save(self.bot.collector_requirements)
-        await ctx.send(f"Set: **{ball.country}** ≥ **{amount}** → **{sp.name}**.", ephemeral=True)
-        log.info(f"{ctx.author} set collector requirement for {ball.country} (min={amount} special={sp.name})", extra={"webhook": True})
+class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
+    requirements_input = TextInput(
+        label="BallName | Amount | SpecialName",
+        style=discord.TextStyle.paragraph,
+        placeholder=(
+            "One requirement per line:\n"
+            "France | 30 | Bronze\n"
+            "France | 50 | Silver\n"
+            "Germany | 10 | Gold"
+        ),
+        required=True,
+        max_length=4000,
+    )
 
-    @commands.hybrid_command(name="collector-delete")
-    @app_commands.describe(countryball="Ball to remove requirement for")
-    @_admin_check()
-    async def collector_delete(self, ctx: commands.Context, countryball: str):
-        """Delete a collector requirement"""
-        match = next((v for v in self.bot.collector_requirements.values() if v["ball_name"].lower() == countryball.lower()), None)
-        if not match:
-            return await ctx.send(f"No requirement for **{countryball}**.", ephemeral=True)
-        del self.bot.collector_requirements[match["ball_id"]]
-        self.bot.collector_claimed.pop(match["ball_id"], None)
-        _save(self.bot.collector_requirements)
-        await ctx.send(f"Deleted requirement for **{match['ball_name']}**.", ephemeral=True)
-        log.info(f"{ctx.author} deleted collector requirement for {match['ball_name']}", extra={"webhook": True})
+    async def on_submit(self, interaction: Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            await self._process(interaction)
+        except Exception:
+            import traceback
+            log.exception("Error in bulk add modal")
+            await interaction.followup.send(
+                f"An error occurred:\n```py\n{traceback.format_exc()[:1800]}\n```",
+                ephemeral=True,
+            )
 
-    @commands.hybrid_command(name="collector-view")
-    @app_commands.describe(countryball="Ball to inspect")
-    @_admin_check()
-    async def collector_view(self, ctx: commands.Context, countryball: str):
-        """View a collector requirement"""
-        match = next((v for v in self.bot.collector_requirements.values() if v["ball_name"].lower() == countryball.lower()), None)
-        if not match:
-            return await ctx.send(f"No requirement for **{countryball}**.", ephemeral=True)
-        claimed = len(self.bot.collector_claimed.get(match["ball_id"], set()))
-        await ctx.send(f"**{match['ball_name']}** — min: **{match['amount']}** • reward: **{match['special_name']}** • claims this session: **{claimed}**", ephemeral=True)
+    async def _process(self, interaction: Interaction):
+        from bd_models.models import Special
 
+        lines = [l.strip() for l in self.requirements_input.value.splitlines() if l.strip()]
+        if not lines:
+            await interaction.followup.send("No requirements provided.", ephemeral=True)
+            return
+
+        added: list[str] = []
+        errors: list[str] = []
+
+        for line in lines:
+            parts = [p.strip() for p in line.split("|")]
+            if len(parts) != 3:
+                errors.append(f"`{line}` — must be `BallName | Amount | SpecialName`")
+                continue
+
+            ball_name, amount_str, special_name = parts
+
+            try:
+                amount = int(amount_str)
+                if not (1 <= amount <= 9999):
+                    raise ValueError
+            except ValueError:
+                errors.append(f"`{line}` — amount must be 1–9999")
+                continue
+
+            ball = await Ball.objects.filter(
+                country__iexact=ball_name, enabled=True
+            ).afirst()
+            if ball is None:
+                ball = await Ball.objects.filter(
+                    country__icontains=ball_name, enabled=True
+                ).afirst()
+            if ball is None:
+                errors.append(
+                    f"`{line}` — {settings.collectible_name} `{ball_name}` not found"
+                )
+                continue
+
+            special = await Special.objects.filter(name__iexact=special_name).afirst()
+            if special is None:
+                special = await Special.objects.filter(
+                    name__icontains=special_name
+                ).afirst()
+            if special is None:
+                errors.append(f"`{line}` — special `{special_name}` not found")
+                continue
+
+            await CollectorRequirement.objects.aupdate_or_create(
+                ball=ball,
+                special=special,
+                defaults={"amount": amount},
+            )
+            added.append(f"**{ball.country}** — ≥{amount:,} → {special.name}")
+
+        result_lines: list[str] = []
+        if added:
+            result_lines.append(f"**Added {len(added)} requirement(s):**")
+            result_lines.extend(added)
+        if errors:
+            result_lines.append(f"\n**Errors ({len(errors)}):**")
+            result_lines.extend(errors)
+
+        result_text = "\n".join(result_lines)
+        if len(result_text) > 1900:
+            result_text = result_text[:1900] + "\n... (truncated)"
+
+        await interaction.followup.send(result_text, ephemeral=True)
+
+        if added:
+            log.info(
+                f"{interaction.user} bulk added {len(added)} collector requirement(s). "
+                f"Errors: {len(errors)}",
+                extra={"webhook": True},
+            )
+
+
+# ── Player cog ────────────────────────────────────────────────────────────────
 
 class CollectorCog(commands.GroupCog, name="collector"):
+    """Collector commands — claim special versions of balls you've collected enough of."""
+
     def __init__(self, bot: "BallsDexBot"):
         self.bot = bot
-        if not hasattr(bot, "collector_requirements"):
-            bot.collector_requirements = _load()
-        if not hasattr(bot, "collector_claimed"):
-            bot.collector_claimed = {}
-        super().__init__()
 
-    @commands.hybrid_command(name="claim", description="Claim your collector ball reward")
-    @app_commands.describe(countryball="Ball to claim a collector version of")
-    async def collector_claim(self, ctx: commands.Context, countryball: str):
-        ball = None
-        async for b in Ball.objects.filter(enabled=True):
-            if b.country.lower() == countryball.lower():
-                ball = b; break
-        if not ball:
-            return await ctx.send(f"No ball matching `{countryball}`.", ephemeral=True)
+    # ── /collector claim ──────────────────────────────────────────────────────
 
-        req = self.bot.collector_requirements.get(ball.pk)
-        if not req:
-            return await ctx.send(f"No collector requirement for **{ball.country}**.", ephemeral=True)
+    @app_commands.command()
+    @app_commands.describe(
+        countryball=(
+            f"The {settings.collectible_name} to claim "
+            "(leave empty to see your full overview)"
+        )
+    )
+    async def claim(self, interaction: Interaction, countryball: str | None = None):
+        """Claim your collector ball reward, or see what you can claim."""
+        await interaction.response.defer(ephemeral=True)
 
-        player, _ = await Player.objects.aget_or_create(discord_id=ctx.author.id)
+        player, _ = await Player.objects.aget_or_create(discord_id=interaction.user.id)
 
-        if ctx.author.id in self.bot.collector_claimed.get(ball.pk, set()):
-            return await ctx.send(f"You already claimed your collector **{ball.country}**!", ephemeral=True)
+        # ── No argument: show overview ────────────────────────────────────────
+        if countryball is None:
+            all_reqs = [
+                r async for r in
+                CollectorRequirement.objects.select_related("ball", "special")
+                .order_by("ball__country", "amount")
+                .aiterator()
+            ]
+            if not all_reqs:
+                await interaction.followup.send(
+                    "There are no collector requirements set up yet.", ephemeral=True
+                )
+                return
 
-        count = await BallInstance.objects.filter(player=player, ball=ball, deleted=False).acount()
-        if count < req["amount"]:
-            return await ctx.send(f"You need **{req['amount']}** {ball.country} but only have **{count}**.", ephemeral=True)
+            # Group by ball
+            by_ball: dict[int, list[CollectorRequirement]] = defaultdict(list)
+            for r in all_reqs:
+                by_ball[r.ball_id].append(r)
 
-        special = await Special.objects.filter(pk=req["special_id"]).afirst()
-        if not special:
-            log.error("Collector special ID %d not found for %s", req["special_id"], ball.country)
-            return await ctx.send("The reward special no longer exists. Contact an admin.", ephemeral=True)
+            claimable: list[str] = []
+            in_progress: list[str] = []
 
-        inst = await BallInstance.objects.acreate(player=player, ball=ball, special=special, attack_bonus=0, health_bonus=0, server_id=ctx.guild.id if ctx.guild else None)
-        self.bot.collector_claimed.setdefault(ball.pk, set()).add(ctx.author.id)
-        log.info(f"{ctx.author} claimed collector {ball.country} / {special.name} (#{inst.pk:0X})", extra={"webhook": True})
-        await ctx.send(f"You claimed your **{special.emoji or ''} {special.name} {ball.country}** collector {settings.collectible_name}! (`#{inst.pk:0X}`)", ephemeral=True)
+            for ball_id, reqs in by_ball.items():
+                ball = balls_cache.get(ball_id) or reqs[0].ball
+                count = await _count_owned(player, ball_id)
+                emoji = _ball_emoji(self.bot, ball_id)
 
-    @commands.hybrid_command(name="list", description="List all active collector requirements")
-    @app_commands.describe(reverse="Reverse the list order")
-    async def collector_list(self, ctx: commands.Context, reverse: bool = False):
-        req = self.bot.collector_requirements
-        if not req:
-            return await ctx.send("No collector requirements set up yet.", ephemeral=True)
+                for r in sorted(reqs, key=lambda x: x.amount):
+                    if await _has_claimed(player, r):
+                        continue
+                    if count >= r.amount:
+                        claimable.append(
+                            f"• {emoji} **{ball.country}** — {r.special.name} ✅ ready"
+                        )
+                    else:
+                        pct = round(100 * count / r.amount)
+                        in_progress.append(
+                            f"• {emoji} **{ball.country}** — {r.special.name} "
+                            f"({count:,}/{r.amount:,} · {pct}%)"
+                        )
 
-        grouped: dict[int, list] = {}
-        for r in sorted(req.values(), key=lambda x: x["amount"], reverse=reverse):
-            grouped.setdefault(r["amount"], []).append(r)
+            if not claimable and not in_progress:
+                await interaction.followup.send(
+                    "You have already claimed all available collector rewards!",
+                    ephemeral=True,
+                )
+                return
 
-        lines = []
-        for amount, reqs in grouped.items():
-            lines.append(f"**Minimum: {amount}**")
-            for r in reqs:
-                lines.append(f"* {_emoji(self.bot, r['ball_id'])} {r['ball_name']} → *{r['special_name']}*")
-            lines.append("")
+            lines: list[str] = []
+            if claimable:
+                lines.append("**Ready to claim:**")
+                lines.extend(claimable[:20])
+                if len(claimable) > 20:
+                    lines.append(f"*...and {len(claimable) - 20} more*")
+            if in_progress:
+                lines.append("\n**In progress:**")
+                lines.extend(in_progress[:20])
+                if len(in_progress) > 20:
+                    lines.append(f"*...and {len(in_progress) - 20} more*")
+            lines.append(
+                f"\nUse `/collector claim {settings.collectible_name}:` to claim a specific ball."
+            )
+            await interaction.followup.send("\n".join(lines), ephemeral=True)
+            return
 
-        pages, cur, cur_len = [], [], 0
-        for line in lines:
-            if cur_len + len(line) + 1 > 1800 and cur:
-                pages.append("\n".join(cur)); cur = []; cur_len = 0
-            cur.append(line); cur_len += len(line) + 1
-        if cur:
-            pages.append("\n".join(cur))
+        # ── Specific ball ─────────────────────────────────────────────────────
+        ball = await Ball.objects.filter(
+            enabled=True, country__iexact=countryball
+        ).afirst()
+        if ball is None:
+            ball = await Ball.objects.filter(
+                enabled=True, country__icontains=countryball
+            ).afirst()
+        if ball is None:
+            await interaction.followup.send(
+                f"No ball found matching `{countryball}`.", ephemeral=True
+            )
+            return
 
-        for i, page in enumerate(pages, 1):
-            embed = discord.Embed(title="Collector List" if i == 1 else "Collector List (cont.)", description=page, color=discord.Color.gold())
-            if len(pages) > 1:
-                embed.set_footer(text=f"Page {i}/{len(pages)}")
-            await ctx.send(embed=embed, ephemeral=True)
+        reqs = await _get_reqs(ball.pk)
+        if not reqs:
+            await interaction.followup.send(
+                f"There is no collector requirement set for **{ball.country}**.",
+                ephemeral=True,
+            )
+            return
+
+        count = await _count_owned(player, ball.pk)
+
+        BAR_LEN = 7
+        BAR_FILL, BAR_EMPTY = "█", "░"
+
+        def make_bar(current: int, required: int) -> str:
+            ratio = min(current / required, 1.0)
+            filled = round(BAR_LEN * ratio)
+            pct = round(100 * current / required)
+            return (
+                f"[{BAR_FILL * filled}{BAR_EMPTY * (BAR_LEN - filled)}] "
+                f"{current:,}/{required:,} {pct}%"
+            )
+
+        lines = [f"Collector requirements for **{ball.country}**"]
+        eligible: list[CollectorRequirement] = []
+
+        for r in reqs:
+            bar = make_bar(count, r.amount)
+            claimed = await _has_claimed(player, r)
+            lines.append(f"{r.special.name} — {bar}")
+            if not claimed and count >= r.amount:
+                eligible.append(r)
+
+        progress_text = "\n".join(lines)
+
+        if not eligible:
+            await interaction.followup.send(progress_text, ephemeral=True)
+            return
+
+        if len(eligible) == 1:
+            await interaction.followup.send(progress_text, ephemeral=True)
+            await _do_claim(interaction, ball, player, eligible[0])
+        else:
+            view = ClaimSelectView(interaction, ball, player, eligible)
+            await interaction.followup.send(
+                progress_text + "\n\nYou qualify for multiple rewards! Pick one:",
+                view=view,
+                ephemeral=True,
+            )
+
+    # ── /collector list ───────────────────────────────────────────────────────
+
+    @app_commands.command()
+    @app_commands.describe(
+        special="Filter by special name",
+        reverse="Reverse the output of the list",
+    )
+    async def list(
+        self,
+        interaction: Interaction,
+        special: str | None = None,
+        reverse: bool = False,
+    ):
+        """List all active collector requirements."""
+        await interaction.response.defer(ephemeral=True)
+
+        qs = CollectorRequirement.objects.select_related("ball", "special")
+        if special:
+            qs = qs.filter(special__name__iexact=special.strip())
+        qs = qs.order_by(
+            "-amount" if reverse else "amount",
+            "ball__country",
+        )
+
+        all_reqs = [r async for r in qs.aiterator()]
+        if not all_reqs:
+            msg = (
+                f"No requirements found for special `{special}`."
+                if special
+                else "There are no collector requirements set up yet."
+            )
+            await interaction.followup.send(msg, ephemeral=True)
+            return
+
+        # Group by amount
+        grouped: dict[int, list[CollectorRequirement]] = defaultdict(list)
+        for r in all_reqs:
+            grouped[r.amount].append(r)
+
+        # Build embed field entries — (name, value) pairs for paginator
+        entries: list[tuple[str, str]] = []
+        for amount in grouped:
+            chunk_lines: list[str] = []
+            chunk_num = 1
+            for r in grouped[amount]:
+                emoji = _ball_emoji(self.bot, r.ball_id)
+                line = (
+                    f"* {emoji} {r.ball.country}"
+                    if special
+                    else f"* {emoji} {r.ball.country} → *{r.special.name}*"
+                )
+                if chunk_lines and len("\n".join(chunk_lines + [line])) > 800:
+                    header = f"**Minimum: {amount:,}**" if chunk_num == 1 else "\u200b"
+                    entries.append((header, "\n".join(chunk_lines)))
+                    chunk_lines = []
+                    chunk_num += 1
+                chunk_lines.append(line)
+            if chunk_lines:
+                header = f"**Minimum: {amount:,}**" if chunk_num == 1 else "\u200b"
+                entries.append((header, "\n".join(chunk_lines)))
+
+        # Simple embed pagination (no FieldPageSource dependency)
+        pages: list[discord.Embed] = []
+        FIELDS_PER_PAGE = 3
+        title = f'"{special.strip()}" Collector List' if special else "Collector List"
+        for i in range(0, len(entries), FIELDS_PER_PAGE):
+            chunk = entries[i : i + FIELDS_PER_PAGE]
+            embed = discord.Embed(title=title, color=discord.Color.gold())
+            for name, value in chunk:
+                embed.add_field(name=name, value=value, inline=False)
+            pages.append(embed)
+
+        total = len(pages)
+        for i, embed in enumerate(pages, 1):
+            if total > 1:
+                embed.set_footer(text=f"Page {i}/{total}")
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @list.autocomplete("special")
+    async def list_special_autocomplete(
+        self,
+        interaction: Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        seen: dict[str, str] = {}
+        async for name in (
+            CollectorRequirement.objects
+            .values_list("special__name", flat=True)
+            .distinct()
+            .aiterator()
+        ):
+            if current.lower() in name.lower():
+                seen[name.lower()] = name
+            if len(seen) >= 25:
+                break
+        return [app_commands.Choice(name=n, value=n) for n in seen.values()]
