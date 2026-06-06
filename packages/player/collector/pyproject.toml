@@ -8,8 +8,12 @@ version = "1.0.0"
 description = "Collector system package for BallsDex v3."
 license = "MIT"
 authors = [{ name = "Glitch" }]
+readme = "README.md"
 dependencies = []
+
+[project.urls]
+Repository = "https://github.com/GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["collector", "collector.ext"]
+include = ["collector*"]
