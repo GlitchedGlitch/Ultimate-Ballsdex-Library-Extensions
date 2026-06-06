@@ -1,6 +1,8 @@
 from django.apps import AppConfig
 
 
-class CollectorAppConfig(AppConfig):
+class CollectorConfig(AppConfig):
     name = "collector"
-    dpy_package = "collector.ext"
+    verbose_name = "Collector"
+    default_auto_field = "django.db.models.BigAutoField"
+    dpy_package = "collector.collector"
