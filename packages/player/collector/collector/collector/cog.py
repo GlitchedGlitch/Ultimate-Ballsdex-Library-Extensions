@@ -90,7 +90,6 @@ async def _do_claim(
     log.info(
         f"Player {player.discord_id} claimed {req.special.name} {ball.country} "
         f"(#{new_instance.pk:0X})",
-        extra={"webhook": True},
     )
     await interaction.followup.send(
         f"Congratulations! You claimed **{emoji_str} {req.special.name} {ball.country}** "
@@ -259,6 +258,33 @@ class CollectorCog(commands.GroupCog, name="collector"):
 
     # ── /collector claim ──────────────────────────────────────────────────────
 
+    async def _claim_ball_autocomplete(
+        self,
+        interaction: Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        """Only show balls that have at least one requirement configured."""
+        results: list[app_commands.Choice[str]] = []
+        seen: set[int] = set()
+        async for req in (
+            CollectorRequirement.objects
+            .select_related("ball")
+            .filter(ball__enabled=True)
+            .order_by("ball__country")
+            .aiterator()
+        ):
+            if req.ball_id not in seen:
+                if current.lower() in req.ball.country.lower():
+                    seen.add(req.ball_id)
+                    results.append(
+                        app_commands.Choice(
+                            name=req.ball.country, value=req.ball.country
+                        )
+                    )
+            if len(results) >= 25:
+                break
+        return results
+
     @app_commands.command()
     @app_commands.describe(
         countryball=(
@@ -266,6 +292,7 @@ class CollectorCog(commands.GroupCog, name="collector"):
             "(leave empty to see your full overview)"
         )
     )
+    @app_commands.autocomplete(countryball=_claim_ball_autocomplete)
     async def claim(self, interaction: Interaction, countryball: str | None = None):
         """Claim your collector ball reward, or see what you can claim."""
         await interaction.response.defer(ephemeral=True)
