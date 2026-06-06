@@ -8,6 +8,7 @@ import logging
 from typing import TYPE_CHECKING
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 from ballsdex.core.utils import checks
@@ -20,7 +21,7 @@ if TYPE_CHECKING:
 log = logging.getLogger("ballsdex.packages.admin.collector")
 
 
-# ── Converters ────────────────────────────────────────────────────────────────
+# ── Converters ────────────────────────────────────
 
 class BallConverter(commands.Converter):
     async def convert(self, ctx: commands.Context, value: str) -> Ball:
@@ -44,6 +45,91 @@ class SpecialConverter(commands.Converter):
         return special
 
 
+# ── Autocomplete functions ────────────────────────────────────────────────────
+
+async def _ball_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    """All enabled balls."""
+    results: list[app_commands.Choice[str]] = []
+    async for ball in (
+        Ball.objects.filter(enabled=True, country__icontains=current)
+        .order_by("country")
+        .aiterator()
+    ):
+        results.append(app_commands.Choice(name=ball.country, value=ball.country))
+        if len(results) >= 25:
+            break
+    return results
+
+
+async def _ball_with_req_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    """Only balls that have at least one requirement (for delete/view)."""
+    results: list[app_commands.Choice[str]] = []
+    seen: set[int] = set()
+    async for req in (
+        CollectorRequirement.objects
+        .select_related("ball")
+        .filter(ball__enabled=True, ball__country__icontains=current)
+        .order_by("ball__country")
+        .aiterator()
+    ):
+        if req.ball_id not in seen:
+            seen.add(req.ball_id)
+            results.append(
+                app_commands.Choice(name=req.ball.country, value=req.ball.country)
+            )
+        if len(results) >= 25:
+            break
+    return results
+
+
+async def _special_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    """All specials."""
+    results: list[app_commands.Choice[str]] = []
+    async for special in (
+        Special.objects.filter(name__icontains=current)
+        .order_by("name")
+        .aiterator()
+    ):
+        results.append(app_commands.Choice(name=special.name, value=special.name))
+        if len(results) >= 25:
+            break
+    return results
+
+
+async def _special_with_req_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    """Only specials that have a requirement for the already-chosen ball."""
+    ball_name = getattr(interaction.namespace, "countryball", None)
+    qs = CollectorRequirement.objects.select_related("special")
+    if ball_name:
+        qs = qs.filter(ball__country__iexact=ball_name)
+    if current:
+        qs = qs.filter(special__name__icontains=current)
+
+    results: list[app_commands.Choice[str]] = []
+    seen: set[int] = set()
+    async for req in qs.order_by("special__name").aiterator():
+        if req.special_id not in seen:
+            seen.add(req.special_id)
+            results.append(
+                app_commands.Choice(name=req.special.name, value=req.special.name)
+            )
+        if len(results) >= 25:
+            break
+    return results
+
+
 # ── Bulk modal ────────────────────────────────────────────────────────────────
 
 class BulkAddModal(discord.ui.Modal, title="Bulk Add Collector Requirements"):
@@ -63,7 +149,6 @@ class BulkAddModal(discord.ui.Modal, title="Bulk Add Collector Requirements"):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
         from collector.collector.cog import BulkAddModal as CogBulkAddModal
-        # Reuse the same processing logic from the cog modal
         modal = CogBulkAddModal()
         modal.requirements_input._value = self.requirements_input.value
         await modal._process(interaction)
@@ -80,24 +165,19 @@ async def collector(ctx: commands.Context["BallsDexBot"]):
 
 @collector.command(name="set")
 @checks.is_staff()
+@app_commands.describe(
+    countryball="The ball to set a requirement for",
+    amount="Minimum number the player must own (1–9999)",
+    special="The special reward applied to the claimed collector ball",
+)
+@app_commands.autocomplete(countryball=_ball_autocomplete, special=_special_autocomplete)
 async def collector_set(
     ctx: commands.Context["BallsDexBot"],
     countryball: BallConverter,
     amount: int,
     special: SpecialConverter,
 ):
-    """
-    Set or update a collector requirement.
-
-    Parameters
-    ----------
-    countryball: BallConverter
-        The ball to set a requirement for.
-    amount: int
-        Minimum number the player must own (1–9999).
-    special: SpecialConverter
-        The special reward applied to the claimed collector ball.
-    """
+    """Set or update a collector requirement."""
     if not (1 <= amount <= 9999):
         await ctx.send("Amount must be between 1 and 9999.", ephemeral=True)
         return
@@ -135,32 +215,28 @@ async def collector_bulk(ctx: commands.Context["BallsDexBot"]):
 
 @collector.command(name="delete")
 @checks.is_staff()
+@app_commands.describe(
+    countryball="The ball whose requirement(s) you want to remove",
+    special="Which specific special to remove (leave empty to delete all for this ball)",
+)
+@app_commands.autocomplete(
+    countryball=_ball_with_req_autocomplete,
+    special=_special_with_req_autocomplete,
+)
 async def collector_delete(
     ctx: commands.Context["BallsDexBot"],
     countryball: BallConverter,
     special: str | None = None,
 ):
-    """
-    Delete collector requirement(s) for a ball.
-
-    Parameters
-    ----------
-    countryball: BallConverter
-        The ball whose requirement(s) you want to remove.
-    special: str | None
-        Which specific special to remove. Leave empty to delete all for this ball.
-    """
+    """Delete collector requirement(s) for a ball."""
     qs = CollectorRequirement.objects.filter(ball=countryball)
 
     if special is not None:
-        sp = await Special.objects.filter(name__iexact=special.strip()).afirst()
-        if sp is None:
+        sp_obj = await Special.objects.filter(name__iexact=special.strip()).afirst()
+        if sp_obj is None:
             sp_obj = await Special.objects.filter(
                 name__icontains=special.strip()
             ).afirst()
-        else:
-            sp_obj = sp
-
         if sp_obj is None:
             await ctx.send(
                 f"No requirement with special `{special}` found for "
@@ -193,18 +269,13 @@ async def collector_delete(
 
 @collector.command(name="view")
 @checks.is_staff()
+@app_commands.describe(countryball="The ball to inspect")
+@app_commands.autocomplete(countryball=_ball_with_req_autocomplete)
 async def collector_view(
     ctx: commands.Context["BallsDexBot"],
     countryball: BallConverter,
 ):
-    """
-    View all collector requirements for a ball.
-
-    Parameters
-    ----------
-    countryball: BallConverter
-        The ball to inspect.
-    """
+    """View all collector requirements for a ball."""
     reqs = [
         r async for r in
         CollectorRequirement.objects.filter(ball=countryball)
