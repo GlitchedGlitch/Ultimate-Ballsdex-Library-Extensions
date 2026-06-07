@@ -1,12 +1,5 @@
 """
-Broadcast package for BallsDex.
-
-Commands:
-  /admin broadcast — open the broadcast composer
-
-Spawn channels are pulled automatically from GuildConfig (every guild that has
-a spawn channel configured). Player DMs are sent to every Player row in the
-database.
+Broadcast package for BallsDex v3
 """
 
 from __future__ import annotations
@@ -20,9 +13,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from ballsdex.core.models import GuildConfig, Player
-from ballsdex.core.utils.logging import log_action
-from ballsdex.settings import settings
+from bd_models.models import GuildConfig, Player
+from ballsdex.core.utils import checks
 
 if TYPE_CHECKING:
     from ballsdex.core.bot import BallsDexBot
@@ -146,17 +138,14 @@ class BroadcastView(discord.ui.View):
         self.embed_color: discord.Color = discord.Color.blue()
         self.embed_color_label: str = "blue"
         self.delivery: str = "spawn"
-        self.image_urls: list[str] = []           # for display only
-        self.image_data: list[tuple[bytes, str]] = []  # (raw_bytes, filename)
+        self.image_urls: list[str] = []
+        self.image_data: list[tuple[bytes, str]] = []
         self._awaiting_image: bool = False
         self._rebuild()
-
-    # ── UI builder ────────────────────────────────────────────────────────────
 
     def _rebuild(self):
         self.clear_items()
 
-        # Row 0 — primary actions
         send_btn = discord.ui.Button(
             label="Send",
             style=discord.ButtonStyle.success,
@@ -203,7 +192,6 @@ class BroadcastView(discord.ui.View):
         close_btn.callback = self._close
         self.add_item(close_btn)
 
-        # Row 1 — delivery select
         sel = discord.ui.Select(
             placeholder=f"Delivery: {DELIVERY_LABELS[self.delivery]}",
             options=[
@@ -220,7 +208,6 @@ class BroadcastView(discord.ui.View):
         sel.callback = self._set_delivery
         self.add_item(sel)
 
-        # Row 2 — embed options (only when embed on)
         if self.use_embed:
             title_btn = discord.ui.Button(
                 label=f"Title: {self.embed_title[:18]}{'…' if len(self.embed_title) > 18 else ''}",
@@ -240,9 +227,7 @@ class BroadcastView(discord.ui.View):
             color_btn.callback = self._set_color
             self.add_item(color_btn)
 
-        # Row 3 — image controls
         img_count = len(self.image_data)
-
         add_img_btn = discord.ui.Button(
             label=f"Add File ({img_count}/5)" if img_count else "Add Files",
             style=discord.ButtonStyle.secondary,
@@ -280,7 +265,6 @@ class BroadcastView(discord.ui.View):
             for i, (_, filename) in enumerate(self.image_data, 1):
                 desc += f"  {i}. {filename}\n"
         desc += f"\n**Message preview:**\n{snippet}"
-
         return discord.Embed(
             title="Broadcast Composer",
             description=desc,
@@ -288,8 +272,6 @@ class BroadcastView(discord.ui.View):
         )
 
     def _build_send_payload(self) -> dict:
-        """Build the payload dict for sending to a channel."""
-        files_note = ""  # attachments are re-uploaded from URLs per-destination
         kwargs: dict = {}
         if self.use_embed:
             kwargs["embed"] = discord.Embed(
@@ -301,25 +283,9 @@ class BroadcastView(discord.ui.View):
             kwargs["content"] = self.content
         return kwargs
 
-    async def _fetch_image_files(self) -> list[discord.File]:
-        """Download stored file URLs and return as discord.File objects."""
-        import aiohttp
-        files = []
-        async with aiohttp.ClientSession() as session:
-            for i, url in enumerate(self.image_urls):
-                try:
-                    async with session.get(url) as resp:
-                        if resp.status == 200:
-                            data = await resp.read()
-                            # Guess extension from URL
-                            ext = url.split("?")[0].rsplit(".", 1)[-1] or "png"
-                            files.append(discord.File(
-                                fp=__import__("io").BytesIO(data),
-                                filename=f"broadcast_{i + 1}.{ext}",
-                            ))
-                except Exception:
-                    pass
-        return files
+    def _make_files(self) -> list[discord.File]:
+        import io as _io
+        return [discord.File(_io.BytesIO(d), filename=n) for d, n in self.image_data]
 
     async def _refresh(self, interaction: discord.Interaction):
         kw = dict(embed=self._composer_embed(), view=self)
@@ -327,8 +293,6 @@ class BroadcastView(discord.ui.View):
             await interaction.edit_original_response(**kw)
         else:
             await interaction.response.edit_message(**kw)
-
-    # ── Composer callbacks ────────────────────────────────────────────────────
 
     async def _set_delivery(self, interaction: discord.Interaction):
         self.delivery = interaction.data["values"][0]
@@ -407,7 +371,6 @@ class BroadcastView(discord.ui.View):
         await interaction.response.send_modal(modal)
 
     async def _add_image(self, interaction: discord.Interaction):
-        """Ask the user to send a file in the channel, then capture and delete it."""
         if len(self.image_urls) >= 5:
             await interaction.response.send_message(
                 "Maximum of 5 files allowed.", ephemeral=True
@@ -416,8 +379,6 @@ class BroadcastView(discord.ui.View):
 
         self._awaiting_image = True
         self._rebuild()
-
-        # Acknowledge the button interaction first, then send ephemeral prompt via followup
         await interaction.response.edit_message(embed=self._composer_embed(), view=self)
         prompt = await interaction.followup.send(
             "Please send your file now in this channel. "
@@ -434,7 +395,9 @@ class BroadcastView(discord.ui.View):
             )
 
         try:
-            msg: discord.Message = await self.bot.wait_for("message", check=check, timeout=60)
+            msg: discord.Message = await self.bot.wait_for(
+                "message", check=check, timeout=60
+            )
         except asyncio.TimeoutError:
             self._awaiting_image = False
             self._rebuild()
@@ -443,11 +406,10 @@ class BroadcastView(discord.ui.View):
             except Exception:
                 pass
             await interaction.edit_original_response(
-                content="Files upload timed out.", embed=self._composer_embed(), view=self
+                content="File upload timed out.", embed=self._composer_embed(), view=self
             )
             return
 
-        # Clean up the prompt and the user's message
         try:
             await prompt.delete()
         except Exception:
@@ -465,8 +427,6 @@ class BroadcastView(discord.ui.View):
             )
             return
 
-        # Save the attachment URL (Discord CDN URL — stable enough for reuse during session)
-        # Download bytes immediately while the CDN URL is still accessible
         import aiohttp
         import io as _io
         async with aiohttp.ClientSession() as session:
@@ -478,7 +438,7 @@ class BroadcastView(discord.ui.View):
                         if resp.status == 200:
                             data = await resp.read()
                             self.image_data.append((data, attachment.filename))
-                            self.image_urls.append(attachment.filename)  # display label only
+                            self.image_urls.append(attachment.filename)
                 except Exception:
                     pass
 
@@ -522,21 +482,15 @@ class BroadcastView(discord.ui.View):
         )
         self.stop()
 
-    # ── Confirmation step (same message) ──────────────────────────────────────
-
     async def _confirm(self, interaction: discord.Interaction):
-        """Replace composer with preview + confirmation on the same message."""
         await interaction.response.edit_message(
-            content=(
-                "-# This is a preview of the message. Send now?"
-            ),
+            content="-# This is a preview of the message. Send now?",
             embed=self._build_preview_embed(),
-            attachments=[],   # clear any old attachments shown
+            attachments=[],
             view=ConfirmSendView(self, interaction),
         )
 
-    def _build_preview_embed(self) -> Optional[discord.Embed]:
-        """Return the exact embed the broadcast will send, or a preview container for plain text."""
+    def _build_preview_embed(self) -> discord.Embed:
         if self.use_embed:
             e = discord.Embed(
                 title=self.embed_title,
@@ -554,35 +508,30 @@ class BroadcastView(discord.ui.View):
             e.set_footer(text=f"+ {len(self.image_data)} image(s) attached")
         return e
 
-    # ── Actual send ───────────────────────────────────────────────────────────
-
     async def execute_send(
         self,
         interaction: discord.Interaction,
         original_interaction: discord.Interaction,
     ):
-        """
-        Called by ConfirmSendView after user confirms.
-        Shows live progress bar on the same message, then shows results.
-        """
-        # ── Count targets first ───────────────────────────────────────────────
+        # ── Collect targets using Django ORM ──────────────────────────────────
         spawn_channel_ids: list[int] = []
         player_discord_ids: list[int] = []
 
         if self.delivery in ("spawn", "both"):
-            spawn_channel_ids = list(
-                await GuildConfig.filter(
+            spawn_channel_ids = [
+                x async for x in
+                GuildConfig.objects.filter(
                     spawn_channel__isnull=False, enabled=True
-                ).values_list("spawn_channel", flat=True)
-            )
+                ).values_list("spawn_channel", flat=True).aiterator()
+            ]
 
         if self.delivery in ("dms", "both"):
-            player_discord_ids = list(
-                await Player.all().values_list("discord_id", flat=True)
-            )
+            player_discord_ids = [
+                x async for x in
+                Player.objects.values_list("discord_id", flat=True).aiterator()
+            ]
 
         total = len(spawn_channel_ids) + len(player_discord_ids)
-
         if total == 0:
             await original_interaction.edit_original_response(
                 content="No targets found. Make sure servers have spawn channels configured.",
@@ -591,14 +540,6 @@ class BroadcastView(discord.ui.View):
             )
             return
 
-        # Images were already downloaded at capture time — use stored bytes directly
-        image_data = self.image_data
-
-        def make_files() -> list[discord.File]:
-            import io as _io
-            return [discord.File(_io.BytesIO(d), filename=n) for d, n in image_data]
-
-        # ── Progress embed helper ─────────────────────────────────────────────
         sent_ch = failed_ch = sent_dm = failed_dm = 0
         done = 0
         last_edit = 0.0
@@ -606,9 +547,13 @@ class BroadcastView(discord.ui.View):
         def _progress_embed(stage: str) -> discord.Embed:
             lines = [f"**{stage}**\n{_bar(done, total)}\n"]
             if self.delivery in ("spawn", "both"):
-                lines.append(f"Channels — ✅ {sent_ch}  ❌ {failed_ch} / {len(spawn_channel_ids)} total")
+                lines.append(
+                    f"Channels — ✅ {sent_ch}  ❌ {failed_ch} / {len(spawn_channel_ids)} total"
+                )
             if self.delivery in ("dms", "both"):
-                lines.append(f"DMs      — ✅ {sent_dm}  ❌ {failed_dm} / {len(player_discord_ids)} total")
+                lines.append(
+                    f"DMs      — ✅ {sent_dm}  ❌ {failed_dm} / {len(player_discord_ids)} total"
+                )
             return discord.Embed(
                 title="Broadcasting…",
                 description="\n".join(lines),
@@ -618,7 +563,7 @@ class BroadcastView(discord.ui.View):
         async def _maybe_update(stage: str):
             nonlocal last_edit
             now = asyncio.get_event_loop().time()
-            if now - last_edit >= 1.5:  # throttle edits to avoid rate limits
+            if now - last_edit >= 1.5:
                 last_edit = now
                 try:
                     await original_interaction.edit_original_response(
@@ -627,12 +572,10 @@ class BroadcastView(discord.ui.View):
                 except Exception:
                     pass
 
-        # Initial progress display
         await original_interaction.edit_original_response(
             content=None, embed=_progress_embed("Starting…"), view=None
         )
 
-        # ── Send to spawn channels ────────────────────────────────────────────
         for channel_id in spawn_channel_ids:
             channel = self.bot.get_channel(channel_id)
             if not isinstance(channel, discord.TextChannel):
@@ -642,8 +585,8 @@ class BroadcastView(discord.ui.View):
                 continue
             try:
                 payload = self._build_send_payload()
-                if image_data:
-                    payload["files"] = make_files()
+                if self.image_data:
+                    payload["files"] = self._make_files()
                 await channel.send(**payload)
                 sent_ch += 1
             except Exception:
@@ -651,7 +594,6 @@ class BroadcastView(discord.ui.View):
             done += 1
             await _maybe_update("Sending to channels…")
 
-        # ── Send to player DMs ────────────────────────────────────────────────
         for discord_id in player_discord_ids:
             user = self.bot.get_user(discord_id)
             if user is None:
@@ -664,8 +606,8 @@ class BroadcastView(discord.ui.View):
                     continue
             try:
                 payload = self._build_send_payload()
-                if image_data:
-                    payload["files"] = make_files()
+                if self.image_data:
+                    payload["files"] = self._make_files()
                 await user.send(**payload)
                 sent_dm += 1
             except Exception:
@@ -673,35 +615,33 @@ class BroadcastView(discord.ui.View):
             done += 1
             await _maybe_update("Sending DMs…")
 
-        # ── Final result ──────────────────────────────────────────────────────
         lines = ["**Broadcast complete!**"]
         if self.delivery in ("spawn", "both"):
             lines.append(f"Channels — ✅ {sent_ch} sent  ❌ {failed_ch} failed")
         if self.delivery in ("dms", "both"):
             lines.append(f"DMs      — ✅ {sent_dm} sent  ❌ {failed_dm} failed")
 
-        result_embed = discord.Embed(
-            title="Broadcast Complete",
-            description="\n".join(lines) + f"\n\n{_bar(total, total)}",
-            color=discord.Color.green(),
-        )
-
         await original_interaction.edit_original_response(
-            content=None, embed=result_embed, view=None
+            content=None,
+            embed=discord.Embed(
+                title="Broadcast Complete",
+                description="\n".join(lines) + f"\n\n{_bar(total, total)}",
+                color=discord.Color.green(),
+            ),
+            view=None,
         )
-
-        await log_action(
-            f"{interaction.user.name} sent a broadcast | "
+        log.info(
+            f"{interaction.user} sent a broadcast | "
             f"Delivery: {self.delivery} | "
             f"Embed: {self.use_embed} | "
-            f"Files: {len(self.image_urls)} | "
+            f"Files: {len(self.image_data)} | "
             f"Message: {self.content[:200]!r}",
-            self.bot,
+            extra={"webhook": True},
         )
         self.stop()
 
 
-# ── Confirmation view (shown on same message as composer) ─────────────────────
+# ── Confirm send view ─────────────────────────────────────────────────────────
 
 class ConfirmSendView(discord.ui.View):
     def __init__(self, parent: BroadcastView, original_interaction: discord.Interaction):
@@ -735,19 +675,25 @@ class BroadcastCog(commands.Cog):
         self.bot = bot
 
 
-# ── Slash command group ───────────────────────────────────────────────────────
+# ── /admin broadcast command ──────────────────────────────────────────────────
 
-def BroadcastAdminCommand(bot: "BallsDexBot") -> app_commands.Command:
-    @app_commands.command(
-        name="broadcast",
-        description="Open the broadcast composer",
-    )
-    @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
-    async def broadcast(interaction: discord.Interaction):
-        view = BroadcastView(bot, interaction.user)
-        await interaction.response.send_message(
+@commands.hybrid_group()
+@checks.is_staff()
+async def broadcast(ctx: commands.Context["BallsDexBot"]):
+    """Admin broadcast tools."""
+    pass
+
+
+@broadcast.command(name="broadcast", description="Open the broadcast composer")
+@checks.is_staff()
+async def broadcast_send(ctx: commands.Context["BallsDexBot"]):
+    """Open the broadcast composer."""
+    bot = ctx.bot
+    invoker = ctx.author
+    view = BroadcastView(bot, invoker)  # type: ignore
+    if ctx.interaction:
+        await ctx.interaction.response.send_message(
             embed=view._composer_embed(), view=view, ephemeral=True
         )
-
-    broadcast._is_broadcast = True  # type: ignore
-    return broadcast
+    else:
+        await ctx.send(embed=view._composer_embed(), view=view)
