@@ -677,16 +677,9 @@ class BroadcastCog(commands.Cog):
 
 # ── /admin broadcast command ──────────────────────────────────────────────────
 
-@commands.hybrid_group()
+@commands.hybrid_command(name="broadcast", description="Open the broadcast composer")
 @checks.is_staff()
 async def broadcast(ctx: commands.Context["BallsDexBot"]):
-    """Admin broadcast tools."""
-    pass
-
-
-@broadcast.command(name="broadcast", description="Open the broadcast composer")
-@checks.is_staff()
-async def broadcast_send(ctx: commands.Context["BallsDexBot"]):
     """Open the broadcast composer."""
     bot = ctx.bot
     invoker = ctx.author
