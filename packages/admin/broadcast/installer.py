@@ -7,6 +7,7 @@ from discord.ui import View, Button
 
 REPO       = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
 BRANCH     = "v3"
+# pip subdirectory syntax — points pip at the subfolder containing pyproject.toml
 GIT_URL    = f"git+https://github.com/{REPO}.git@{BRANCH}#subdirectory=packages/player/broadcast"
 APP_PATH   = "broadcast"
 TOML_MARKER = f'path = "{APP_PATH}"'
@@ -57,9 +58,9 @@ def _remove_toml():
         return
     with open(EXTRA_TOML) as f:
         contents = f.read()
-    # Remove only the [[ballsdex.packages]] block, leaving the # comment above it intact
+    # Remove the comment line and the [[ballsdex.packages]] block together
     cleaned = re.sub(
-        r"\[\[ballsdex\.packages\]\][^\[]*path\s*=\s*\"broadcast\"[^\[]*",
+        r"\n?# Broadcast Package\n\[\[ballsdex\.packages\]\][^\[]*path\s*=\s*\"broadcast\"[^\[]*",
         "", contents, flags=re.DOTALL,
     )
     with open(EXTRA_TOML, "w") as f:
@@ -377,8 +378,8 @@ if _is_v2():
             title="Incompatible Version",
             description=(
                 "This installer is for **BallsDex v3** only.\n\n"
-                "Your instance appears to be running **v2** (Tortoise ORM detected,\n\n"
-                "Please use the **v2 branch** of this package instead, or upgrade "
+                "Your instance appears to be running **v2**\n\n"
+                "Please use the **v2 branch** of this package instead, or update "
                 "to v3 before installing."
             ),
             color=discord.Color.red(),
@@ -390,4 +391,3 @@ else:
     color     = discord.Color.gold() if installed else discord.Color.greyple()
     message   = await ctx.send(embed=build_main_embed(installed, color), view=view)
     view.message = message
-
