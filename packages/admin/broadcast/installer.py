@@ -94,13 +94,19 @@ def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
     e = discord.Embed(
         title="Broadcast Package",
         description=(
-            "Adds a broadcast system to your BallsDex instance.\n\n"
-            "**Commands**\n"
-            "• `broadcast claim` — claim a broadcast ball\n"
-            "• `broadcast list` — view all active requirements\n"
-            "• `admin broadcast set` — set a requirement and reward\n"
-            "• `admin broadcast delete` — remove a requirement\n"
-            "• `admin broadcast view` — inspect a requirement\n\n"
+            "Adds an admin broadcast command to your BallsDex instance.\n\n"
+            "**Command**\n"
+            "• `/admin broadcast` — open the broadcast composer\n\n"
+            "**Delivery Options**\n"
+            "• Spawn Channels Only\n"
+            "• Player DMs Only\n"
+            "• Both\n\n"
+            "**Composer Features**\n"
+            "• Edit message content via modal\n"
+            "• Toggle embed on/off\n"
+            "• Set embed title and line color (name or hex)\n"
+            "• Live status preview\n"
+            "• Send / Clear / Close with confirmations\n\n"
             f"**Status:** {status}"
         ),
         color=color,
