@@ -215,7 +215,7 @@ class InstallWarningView(View):
                     "Added to `config/extra.toml`.\n\n"
                     "Now rebuild and restart your bot to finish the install:\n"
                     "```\ndocker compose build\ndocker compose up -d\n```\n"
-                    "After the rebuild, `collector` will appear in the "
+                    "After the rebuild, and also after running `[p].admin syncslash`, `collector` will appear in the "
                     "packages loaded log and all commands will be available.\n\n",
                     discord.Color.green(),
                 ),
