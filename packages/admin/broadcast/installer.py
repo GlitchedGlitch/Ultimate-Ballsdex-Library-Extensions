@@ -12,7 +12,7 @@ GIT_URL    = f"git+https://github.com/{REPO}.git@{BRANCH}#subdirectory=packages/
 APP_PATH   = "broadcast"
 TOML_MARKER = f'path = "{APP_PATH}"'
 TOML_ENTRY = (
-    "\n# Broadcast Package\n"
+    "\n\n# Broadcast Package\n"
     "[[ballsdex.packages]]\n"
     f'location = "{GIT_URL}"\n'
     f'path = "{APP_PATH}"\n'
