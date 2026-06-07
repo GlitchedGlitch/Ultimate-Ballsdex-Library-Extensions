@@ -8,7 +8,7 @@ from discord.ui import View, Button
 REPO       = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
 BRANCH     = "v3"
 # pip subdirectory syntax — points pip at the subfolder containing pyproject.toml
-GIT_URL    = f"git+https://github.com/{REPO}.git@{BRANCH}#subdirectory=packages/player/broadcast"
+GIT_URL    = f"git+https://github.com/{REPO}.git@{BRANCH}#subdirectory=packages/admin/broadcast"
 APP_PATH   = "broadcast"
 TOML_MARKER = f'path = "{APP_PATH}"'
 TOML_ENTRY = (
