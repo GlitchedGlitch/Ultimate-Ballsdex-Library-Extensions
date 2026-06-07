@@ -1,8 +1,5 @@
 """
-Echo package for BallsDex.
-
-Commands:
-  /admin <name> — send, edit, delete, DM or reply to messages as the bot (admin only)
+Echo package for BallsDex
 """
 
 from __future__ import annotations
