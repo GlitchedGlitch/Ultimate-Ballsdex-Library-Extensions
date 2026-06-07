@@ -123,7 +123,7 @@ def build_warning_embed() -> discord.Embed:
             "- \"./extra:/code/extra:rw\"\n"
             "```\n"
             "Then restart your containers:\n"
-            "```\ndocker compose down\ndocker compose up -d\n```\n\n"
+            "```\ndocker compose down\ndocker compose build\ndocker compose up -d\n```\n\n"
             "Once done, click **Confirm Install** below.\n"
             "If you have already done this, you can proceed immediately."
         ),
@@ -230,7 +230,7 @@ class InstallWarningView(View):
                     f"Could not write to `config/extra.toml` — the folder is still **read-only** (`{e.strerror}`).\n\n"
                     "Make sure you edited `docker-compose.yml` and restarted the containers first:\n"
                     "```yaml\n- \"./config:/code/admin_panel/config:rw\"\n- \"./extra:/code/extra:rw\"\n```\n"
-                    "```\ndocker compose down\ndocker compose up -d\n```\n"
+                    "```\ndocker compose down\ndocker compose build\ndocker compose up -d\n```\n"
                     "Then run the installer eval again.",
                     discord.Color.red(),
                 ),
