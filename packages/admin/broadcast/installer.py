@@ -106,7 +106,7 @@ def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
         title="Broadcast Package",
         description=(
             "Adds an admin broadcast command to your BallsDex instance.\n\n"
-            "**Commands**\n"
+            "**Command**\n"
             "• `/admin broadcast` — open the broadcast composer\n\n"
             "**Delivery Options**\n"
             "• Spawn Channels Only\n"
