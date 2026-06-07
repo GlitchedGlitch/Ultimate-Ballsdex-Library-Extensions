@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "Broadcast"
+version = "1.0.0"
+description = "Admin broadcast package for BallsDex v3. Send a message across all configured server :3"
+license = "MIT"
+authors = [{ name = "Glitch" }]
+readme = "README.md"
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["broadcast*"]
