@@ -1,5 +1,5 @@
 """
-Collector Package Installer — BallsDex v3 :DD
+Collector Package Installer v3 :DD
 """
 
 import io, os, re, traceback, discord
@@ -58,8 +58,9 @@ def _remove_toml():
         return
     with open(EXTRA_TOML) as f:
         contents = f.read()
+    # Remove the comment line and the [[ballsdex.packages]] block together
     cleaned = re.sub(
-        r"\n?\[\[ballsdex\.packages\]\][^\[]*path\s*=\s*\"collector\"[^\[]*",
+        r"\n?# Collector Package\n\[\[ballsdex\.packages\]\][^\[]*path\s*=\s*\"collector\"[^\[]*",
         "", contents, flags=re.DOTALL,
     )
     with open(EXTRA_TOML, "w") as f:
@@ -379,7 +380,7 @@ if _is_v2():
             title="Incompatible Version",
             description=(
                 "This installer is for **BallsDex v3** only.\n\n"
-                "Your instance appears to be running **v2**.\n\n"
+                "Your instance appears to be running **v2**\n\n"
                 "Please use the **v2 branch** of this package instead, or update "
                 "to v3 before installing."
             ),
