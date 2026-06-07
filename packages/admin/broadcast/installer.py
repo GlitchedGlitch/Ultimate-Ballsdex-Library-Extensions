@@ -1,183 +1,180 @@
-import asyncio, base64, io, os, requests, traceback, discord
+"""
+Broadcast Package Installer v3
+"""
+
+import io, os, re, traceback, discord
 from discord.ui import View, Button
 
-REPO = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
-BASE = "https://api.github.com/repos/{}/contents/packages/admin/broadcast/{}".format(REPO, "{}")
-PKG = "/code/ballsdex/packages/broadcast"
-CONFIG = "/code/config.yml"
-PACKAGE_ENTRY = "  - ballsdex.packages.broadcast"
-FILES = ("__init__.py", "cog.py")
-FOOTER = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
+REPO       = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
+BRANCH     = "v3"
+GIT_URL    = f"git+https://github.com/{REPO}.git@{BRANCH}#subdirectory=packages/player/broadcast"
+APP_PATH   = "broadcast"
+TOML_MARKER = f'path = "{APP_PATH}"'
+TOML_ENTRY = (
+    "\n# Broadcast Package\n"
+    "[[ballsdex.packages]]\n"
+    f'location = "{GIT_URL}"\n'
+    f'path = "{APP_PATH}"\n'
+    "enabled = true\n"
+)
+
+# Correct path: docker-compose mounts ./config to /code/admin_panel/config
+EXTRA_TOML = "/code/admin_panel/config/extra.toml"
+
+FOOTER         = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
 FOOTER_TIMEOUT = FOOTER + " • Timed out"
+BAR_FILLED, BAR_EMPTY, BAR_LEN = "█", "░", 10
 
-BAR_FILLED = "█"
-BAR_EMPTY  = "░"
-BAR_LEN    = 10
 
+# ── extra.toml helpers ────────────────────────────────────────────────────────
+
+def _toml_has_entry() -> bool:
+    try:
+        if not os.path.isfile(EXTRA_TOML):
+            return False
+        with open(EXTRA_TOML) as f:
+            return TOML_MARKER in f.read()
+    except OSError:
+        return False
+
+
+def _write_toml():
+    os.makedirs(os.path.dirname(EXTRA_TOML), exist_ok=True)
+    if os.path.isfile(EXTRA_TOML):
+        with open(EXTRA_TOML) as f:
+            contents = f.read()
+        if TOML_MARKER in contents:
+            return
+        with open(EXTRA_TOML, "a") as f:
+            f.write(TOML_ENTRY)
+    else:
+        with open(EXTRA_TOML, "w") as f:
+            f.write(TOML_ENTRY.lstrip())
+
+
+def _remove_toml():
+    if not os.path.isfile(EXTRA_TOML):
+        return
+    with open(EXTRA_TOML) as f:
+        contents = f.read()
+    # Remove only the [[ballsdex.packages]] block, leaving the # comment above it intact
+    cleaned = re.sub(
+        r"\[\[ballsdex\.packages\]\][^\[]*path\s*=\s*\"broadcast\"[^\[]*",
+        "", contents, flags=re.DOTALL,
+    )
+    with open(EXTRA_TOML, "w") as f:
+        f.write(cleaned)
+
+
+def is_installed() -> bool:
+    return _toml_has_entry()
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _bar(current: int, total: int) -> str:
     filled = round(BAR_LEN * current / total)
-    pct = round(100 * current / total)
-    return f"`{BAR_FILLED * filled}{BAR_EMPTY * (BAR_LEN - filled)}` {pct}%"
+    return f"`{BAR_FILLED * filled}{BAR_EMPTY * (BAR_LEN - filled)}` {round(100 * current / total)}%"
 
 
 def _progress_embed(title: str, steps: list, color: discord.Color) -> discord.Embed:
-    done_count = sum(1 for _, s in steps if s is True)
-    total = len(steps)
-    lines = []
-    for label, state in steps:
-        icon = {None: "⬜", True: "✅", False: "❌"}[state]
-        lines.append(f"{icon} {label}")
-    embed = discord.Embed(
-        title=title,
-        description="\n".join(lines) + f"\n\n{_bar(done_count, total)}",
-        color=color,
-    )
-    embed.set_footer(text=FOOTER)
-    return embed
-
-
-# ── Admin group + sync helpers ────────────────────────────────────────────────
-
-def _remove_broadcast_command(bot):
-    admin_cog = bot.get_cog("Admin")
-    if admin_cog and admin_cog.__cog_app_commands_group__:
-        group = admin_cog.__cog_app_commands_group__
-        cmd = group.get_command("broadcast")
-        if cmd is not None:
-            group.remove_command("broadcast")
-
-
-async def _sync_tree(bot):
-    from ballsdex.settings import settings
-    guild_syncs = [
-        bot.tree.sync(guild=discord.Object(id=gid))
-        for gid in settings.admin_guild_ids
-    ]
-    await asyncio.gather(bot.tree.sync(), *guild_syncs)
-
-
-# ── File helpers ──────────────────────────────────────────────────────────────
-
-def is_installed():
-    return os.path.isdir(PKG) and os.path.isfile(os.path.join(PKG, "cog.py"))
-
-
-def download_files():
-    for f in FILES:
-        resp = requests.get(BASE.format(f))
-        resp.raise_for_status()
-        content = base64.b64decode(resp.json()["content"]).decode()
-        with open(os.path.join(PKG, f), "w") as fh:
-            fh.write(content)
-
-
-def add_to_config():
-    with open(CONFIG, "r") as f:
-        lines = f.readlines()
-    if any(PACKAGE_ENTRY.strip() in l for l in lines):
-        return
-    for i, line in enumerate(lines):
-        if "ballsdex.packages.trade" in line:
-            lines.insert(i + 1, PACKAGE_ENTRY + "\n")
-            break
-    with open(CONFIG, "w") as f:
-        f.writelines(lines)
-
-
-def remove_from_config():
-    with open(CONFIG, "r") as f:
-        lines = f.readlines()
-    lines = [l for l in lines if "ballsdex.packages.broadcast" not in l]
-    with open(CONFIG, "w") as f:
-        f.writelines(lines)
-
-
-def delete_files():
-    import shutil
-    if os.path.isdir(PKG):
-        shutil.rmtree(PKG)
+    done  = sum(1 for _, s in steps if s is True)
+    icons = {None: "⬜", True: "✅", False: "❌"}
+    lines = [f"{icons[s]} {label}" for label, s in steps]
+    e = discord.Embed(title=title, description="\n".join(lines) + f"\n\n{_bar(done, len(steps))}", color=color)
+    e.set_footer(text=FOOTER)
+    return e
 
 
 # ── Embeds ────────────────────────────────────────────────────────────────────
 
 def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
-    embed = discord.Embed(
+    status = "✅ Registered in `extra.toml` — rebuild to activate" if installed else "❌ Not installed"
+    e = discord.Embed(
         title="Broadcast Package",
         description=(
-            "Adds an admin broadcast command to your BallsDex instance.\n\n"
+            "Adds a broadcast system to your BallsDex instance.\n\n"
             "**Commands**\n"
-            "• `/admin broadcast` — open the broadcast composer\n\n"
-            "**Delivery Options**\n"
-            "• Spawn Channels Only\n"
-            "• Player DMs Only\n"
-            "• Both\n\n"
-            "**Composer Features**\n"
-            "• Edit message content via modal\n"
-            "• Toggle embed on/off\n"
-            "• Set embed title and line color (name or hex)\n"
-            "• Live status preview\n"
-            "• Send / Clear / Close with confirmations\n\n"
-            f"**Status:** {'✅ Installed' if installed else '❌ Not installed'}"
+            "• `broadcast claim` — claim a broadcast ball\n"
+            "• `broadcast list` — view all active requirements\n"
+            "• `admin broadcast set` — set a requirement and reward\n"
+            "• `admin broadcast delete` — remove a requirement\n"
+            "• `admin broadcast view` — inspect a requirement\n\n"
+            f"**Status:** {status}"
         ),
         color=color,
     )
-    embed.set_footer(text=FOOTER)
-    return embed
+    e.set_footer(text=FOOTER)
+    return e
 
 
-def build_confirm_embed() -> discord.Embed:
-    embed = discord.Embed(
-        title="Delete Broadcast Package",
+def build_warning_embed() -> discord.Embed:
+    e = discord.Embed(
+        title="⚠️ Before Installing — Required Setup",
         description=(
-            "⚠️ **Are you sure you want to delete the Broadcast package?**\n\n"
-            "This will:\n"
-            "• Unload the package from the bot\n"
-            "• Remove `/admin broadcast` from Discord\n"
-            "• Delete all package files\n"
-            "• Remove it from `config.yml`\n\n"
-            "This action **cannot be undone** without reinstalling."
+            "The installer needs to write to `config/extra.toml`. "
+            "By default Docker mounts this folder as **read-only**, "
+            "so you must edit your `docker-compose.yml` first.\n\n"
+            "**Find these two lines** in both the `bot` and `admin-panel` services "
+            "and change `:ro` to `:rw`:\n"
+            "```yaml\n"
+            "- \"./config:/code/admin_panel/config:rw\"\n"
+            "- \"./extra:/code/extra:rw\"\n"
+            "```\n"
+            "Then restart your containers:\n"
+            "```\ndocker compose down\ndocker compose up -d\n```\n\n"
+            "Once done, click **Confirm Install** below.\n"
+            "If you have already done this, you can proceed immediately."
         ),
         color=discord.Color.orange(),
     )
-    embed.set_footer(text=FOOTER)
-    return embed
+    e.set_footer(text=FOOTER)
+    return e
+
+
+def build_confirm_remove_embed() -> discord.Embed:
+    e = discord.Embed(
+        title="Remove Broadcast Package",
+        description=(
+            "⚠️ **Are you sure?**\n\n"
+            "This will remove the entry from `config/extra.toml`.\n"
+            "The package will stop loading after the next rebuild.\n\n"
+        ),
+        color=discord.Color.orange(),
+    )
+    e.set_footer(text=FOOTER)
+    return e
 
 
 def build_error_embed(action: str, error: str) -> discord.Embed:
     short = error[:1000] + "..." if len(error) > 1000 else error
-    embed = discord.Embed(
+    e = discord.Embed(
         title="An error occurred",
-        description=(
-            f"An error occurred when **{action}** the package!\n\n"
-            f"```\n{short}\n```\n\n"
-            "The full error is attached as a `.txt` file below."
-        ),
+        description=f"An error occurred when **{action}** the package!\n\n```\n{short}\n```\n\nFull error attached below.",
         color=discord.Color.red(),
     )
-    embed.set_footer(text=FOOTER)
-    return embed
+    e.set_footer(text=FOOTER)
+    return e
 
 
 def build_result_embed(title: str, description: str, color: discord.Color) -> discord.Embed:
-    embed = discord.Embed(title=title, description=description, color=color)
-    embed.set_footer(text=FOOTER)
-    return embed
+    e = discord.Embed(title=title, description=description, color=color)
+    e.set_footer(text=FOOTER)
+    return e
 
 
-# ── Confirm delete ────────────────────────────────────────────────────────────
+# ── Warning gate view (shown before install) ──────────────────────────────────
 
-class ConfirmDeleteView(View):
+class InstallWarningView(View):
     def __init__(self, parent: "BroadcastInstallerView"):
-        super().__init__(timeout=60)
+        super().__init__(timeout=120)
         self.parent = parent
 
     async def on_timeout(self):
         if not self.parent.done:
             color = discord.Color.gold() if self.parent.installed else discord.Color.greyple()
             await self.parent.message.edit(
-                embed=build_main_embed(self.parent.installed, color),
-                view=self.parent,
+                embed=build_main_embed(self.parent.installed, color), view=self.parent
             )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -186,64 +183,54 @@ class ConfirmDeleteView(View):
             return False
         return True
 
-    @discord.ui.button(label="Yes, delete it", style=discord.ButtonStyle.danger, emoji="🗑️")
+    @discord.ui.button(label="Confirm Install", style=discord.ButtonStyle.success, emoji="✅")
     async def confirm_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
-
-        DELETE_STEPS = [
-            "Removing command from Discord",
-            "Unloading extension",
-            "Syncing command tree",
-            "Deleting package files",
-            "Removing from config.yml",
-        ]
-        steps = [(s, None) for s in DELETE_STEPS]
+        steps = [("Writing to config/extra.toml", None)]
 
         async def update(i: int, success: bool = True):
             steps[i] = (steps[i][0], success)
             await self.parent.message.edit(
-                embed=_progress_embed("Deleting Broadcast Package…", steps, discord.Color.red()),
+                embed=_progress_embed("Installing Broadcast Package…", steps, discord.Color.blurple()),
                 view=None,
             )
 
         await self.parent.message.edit(
-            embed=_progress_embed("Deleting Broadcast Package…", steps, discord.Color.red()),
+            embed=_progress_embed("Installing Broadcast Package…", steps, discord.Color.blurple()),
             view=None,
         )
 
         try:
-            _remove_broadcast_command(self.parent.bot)
+            _write_toml()
             await update(0)
-
-            try:
-                await self.parent.bot.unload_extension("ballsdex.packages.broadcast")
-            except Exception:
-                pass
-            await update(1)
-
-            await _sync_tree(self.parent.bot)
-            await update(2)
-
-            delete_files()
-            await update(3)
-
-            remove_from_config()
-            await update(4)
-
-            self.parent.installed = False
+            self.parent.installed = True
+            self.parent._update_buttons()
             self.parent.done = True
             self.stop()
             await self.parent.message.edit(
                 embed=build_result_embed(
-                    "Successfully Deleted",
-                    (
-                        "The **Broadcast Package** has been removed.\n\n"
-                        "• `/admin broadcast` removed from Discord\n"
-                        "• All package files deleted\n"
-                        "• Removed from `config.yml`\n\n"
-                        "Restart the bot to fully apply the config change.\n\n"
-                        "Run this installer again to reinstall."
-                    ),
+                    "Entry Added — Rebuild Required",
+                    "Added to `config/extra.toml`.\n\n"
+                    "Now rebuild and restart your bot to finish the install:\n"
+                    "```\ndocker compose build\ndocker compose up -d\n```\n"
+                    "After the rebuild, `broadcast` will appear in the "
+                    "packages loaded log and all commands will be available.\n\n",
+                    discord.Color.green(),
+                ),
+                view=None,
+            )
+        except OSError as e:
+            self.parent.done = True
+            self.stop()
+            steps[0] = (steps[0][0], False)
+            await self.parent.message.edit(
+                embed=build_result_embed(
+                    "Permission Denied",
+                    f"Could not write to `config/extra.toml` — the folder is still **read-only** (`{e.strerror}`).\n\n"
+                    "Make sure you edited `docker-compose.yml` and restarted the containers first:\n"
+                    "```yaml\n- \"./config:/code/admin_panel/config:rw\"\n- \"./extra:/code/extra:rw\"\n```\n"
+                    "```\ndocker compose down\ndocker compose up -d\n```\n"
+                    "Then run the installer eval again.",
                     discord.Color.red(),
                 ),
                 view=None,
@@ -252,21 +239,75 @@ class ConfirmDeleteView(View):
             err = traceback.format_exc()
             self.parent.done = True
             self.stop()
-            for i, (label, state) in enumerate(steps):
-                if state is None:
-                    steps[i] = (label, False)
-                    break
-            f = discord.File(io.BytesIO(err.encode()), filename="delete_error.txt")
-            await self.parent.message.edit(embed=build_error_embed("deleting", err), view=None)
-            await interaction.followup.send(file=f)
+            steps[0] = (steps[0][0], False)
+            await self.parent.message.edit(embed=build_error_embed("installing", err), view=None)
+            await interaction.followup.send(
+                file=discord.File(io.BytesIO(err.encode()), filename="install_error.txt")
+            )
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary, emoji="↩️")
+    async def cancel_button(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        color = discord.Color.gold() if self.parent.installed else discord.Color.greyple()
+        await self.parent.message.edit(
+            embed=build_main_embed(self.parent.installed, color), view=self.parent
+        )
+
+
+# ── Confirm remove view ───────────────────────────────────────────────────────
+
+class ConfirmRemoveView(View):
+    def __init__(self, parent: "BroadcastInstallerView"):
+        super().__init__(timeout=60)
+        self.parent = parent
+
+    async def on_timeout(self):
+        if not self.parent.done:
+            color = discord.Color.gold() if self.parent.installed else discord.Color.greyple()
+            await self.parent.message.edit(
+                embed=build_main_embed(self.parent.installed, color), view=self.parent
+            )
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.parent.ctx.author.id:
+            await interaction.response.send_message("This menu is not for you.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="Yes, remove it", style=discord.ButtonStyle.danger, emoji="🗑️")
+    async def confirm_button(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        try:
+            _remove_toml()
+            self.parent.installed = False
+            self.parent._update_buttons()
+            self.parent.done = True
+            self.stop()
+            await self.parent.message.edit(
+                embed=build_result_embed(
+                    "Entry Removed",
+                    "Removed from `config/extra.toml`.\n\n"
+                    "Rebuild to fully uninstall:\n"
+                    "```\ndocker compose build\ndocker compose up -d\n```\n",
+                    discord.Color.red(),
+                ),
+                view=None,
+            )
+        except Exception:
+            err = traceback.format_exc()
+            self.parent.done = True
+            self.stop()
+            await self.parent.message.edit(embed=build_error_embed("removing", err), view=None)
+            await interaction.followup.send(
+                file=discord.File(io.BytesIO(err.encode()), filename="remove_error.txt")
+            )
 
     @discord.ui.button(label="No, go back", style=discord.ButtonStyle.secondary, emoji="↩️")
     async def cancel_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
         color = discord.Color.gold() if self.parent.installed else discord.Color.greyple()
         await self.parent.message.edit(
-            embed=build_main_embed(self.parent.installed, color),
-            view=self.parent,
+            embed=build_main_embed(self.parent.installed, color), view=self.parent
         )
 
 
@@ -275,25 +316,21 @@ class ConfirmDeleteView(View):
 class BroadcastInstallerView(View):
     def __init__(self, bot, ctx, installed: bool):
         super().__init__(timeout=180)
-        self.bot = bot
-        self.ctx = ctx
+        self.bot = bot; self.ctx = ctx
         self.installed = installed
-        self.done = False
-        self.message = None
+        self.done = False; self.message = None
         self._update_buttons()
 
     def _update_buttons(self):
         for c in self.children:
             if c.label == "Install":
                 c.disabled = self.installed
-            elif c.label in ("Update", "Delete"):
+            elif c.label == "Remove":
                 c.disabled = not self.installed
 
     async def on_timeout(self):
-        if self.done:
-            return
-        for c in self.children:
-            c.disabled = True
+        if self.done: return
+        for c in self.children: c.disabled = True
         if self.message:
             embed = build_main_embed(self.installed, discord.Color.dark_grey())
             embed.set_footer(text=FOOTER_TIMEOUT)
@@ -308,141 +345,49 @@ class BroadcastInstallerView(View):
     @discord.ui.button(label="Install", style=discord.ButtonStyle.success, emoji="📥")
     async def install_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
+        # Show warning/confirmation gate before doing anything
+        await self.message.edit(embed=build_warning_embed(), view=InstallWarningView(self))
 
-        INSTALL_STEPS = [
-            "Creating package folder",
-            "Downloading files",
-            "Adding to config.yml",
-            "Loading extension",
-            "Syncing command tree",
-        ]
-        steps = [(s, None) for s in INSTALL_STEPS]
-
-        async def update(i: int, success: bool = True):
-            steps[i] = (steps[i][0], success)
-            await self.message.edit(
-                embed=_progress_embed("Installing Broadcast Package…", steps, discord.Color.blurple()),
-                view=None,
-            )
-
-        await self.message.edit(
-            embed=_progress_embed("Installing Broadcast Package…", steps, discord.Color.blurple()),
-            view=None,
-        )
-
-        try:
-            os.makedirs(PKG, exist_ok=True)
-            await update(0)
-
-            download_files()
-            await update(1)
-
-            add_to_config()
-            await update(2)
-
-            await self.bot.load_extension("ballsdex.packages.broadcast")
-            await update(3)
-
-            await _sync_tree(self.bot)
-            await update(4)
-
-            self.done = True
-            self.stop()
-            await self.message.edit(
-                embed=build_result_embed(
-                    "Successfully Installed",
-                    (
-                        "The **Broadcast Package** has been installed as `/admin broadcast`.\n\n"
-                        "Run this installer again to update or remove the package."
-                    ),
-                    discord.Color.green(),
-                ),
-                view=None,
-            )
-        except Exception:
-            err = traceback.format_exc()
-            self.done = True
-            self.stop()
-            for i, (label, state) in enumerate(steps):
-                if state is None:
-                    steps[i] = (label, False)
-                    break
-            f = discord.File(io.BytesIO(err.encode()), filename="install_error.txt")
-            await self.message.edit(embed=build_error_embed("installing", err), view=None)
-            await interaction.followup.send(file=f)
-
-    @discord.ui.button(label="Update", style=discord.ButtonStyle.primary, emoji="🔄")
-    async def update_button(self, interaction: discord.Interaction, button: Button):
+    @discord.ui.button(label="Remove", style=discord.ButtonStyle.danger, emoji="🗑️")
+    async def remove_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
-
-        UPDATE_STEPS = [
-            "Downloading latest files",
-            "Reloading extension",
-            "Syncing command tree",
-        ]
-        steps = [(s, None) for s in UPDATE_STEPS]
-
-        async def update(i: int, success: bool = True):
-            steps[i] = (steps[i][0], success)
-            await self.message.edit(
-                embed=_progress_embed("Updating Broadcast Package…", steps, discord.Color.blurple()),
-                view=None,
-            )
-
-        await self.message.edit(
-            embed=_progress_embed("Updating Broadcast Package…", steps, discord.Color.blurple()),
-            view=None,
-        )
-
-        try:
-            download_files()
-            await update(0)
-
-            loaded = "ballsdex.packages.broadcast" in self.bot.extensions
-            if loaded:
-                await self.bot.reload_extension("ballsdex.packages.broadcast")
-            else:
-                await self.bot.load_extension("ballsdex.packages.broadcast")
-            await update(1)
-
-            await _sync_tree(self.bot)
-            await update(2)
-
-            self.done = True
-            self.stop()
-            await self.message.edit(
-                embed=build_result_embed(
-                    "Successfully Updated",
-                    (
-                        "The **Broadcast Package** has been updated and reloaded.\n\n"
-                        "Run this installer again to update or remove the package."
-                    ),
-                    discord.Color.blue(),
-                ),
-                view=None,
-            )
-        except Exception:
-            err = traceback.format_exc()
-            self.done = True
-            self.stop()
-            for i, (label, state) in enumerate(steps):
-                if state is None:
-                    steps[i] = (label, False)
-                    break
-            f = discord.File(io.BytesIO(err.encode()), filename="update_error.txt")
-            await self.message.edit(embed=build_error_embed("updating", err), view=None)
-            await interaction.followup.send(file=f)
-
-    @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger, emoji="🗑️")
-    async def delete_button(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.defer()
-        await self.message.edit(embed=build_confirm_embed(), view=ConfirmDeleteView(self))
+        await self.message.edit(embed=build_confirm_remove_embed(), view=ConfirmRemoveView(self))
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-installed = is_installed()
-view = BroadcastInstallerView(bot, ctx, installed)
-initial_color = discord.Color.gold() if installed else discord.Color.greyple()
-message = await ctx.send(embed=build_main_embed(installed, initial_color), view=view)
-view.message = message
+def _is_v2() -> bool:
+    """Detect v2 by checking for Tortoise ORM and absence of a ready Django setup."""
+    try:
+        from django.apps import apps
+        apps.check_apps_ready()
+        return False  # Django is up — this is v3
+    except Exception:
+        pass
+    try:
+        import tortoise  # noqa: F401
+        return True  # Tortoise present, Django not ready — this is v2
+    except ImportError:
+        pass
+    return False
+
+if _is_v2():
+    await ctx.send(
+        embed=discord.Embed(
+            title="Incompatible Version",
+            description=(
+                "This installer is for **BallsDex v3** only.\n\n"
+                "Your instance appears to be running **v2** (Tortoise ORM detected,\n\n"
+                "Please use the **v2 branch** of this package instead, or upgrade "
+                "to v3 before installing."
+            ),
+            color=discord.Color.red(),
+        ).set_footer(text=FOOTER)
+    )
+else:
+    installed = is_installed()
+    view      = BroadcastInstallerView(bot, ctx, installed)
+    color     = discord.Color.gold() if installed else discord.Color.greyple()
+    message   = await ctx.send(embed=build_main_embed(installed, color), view=view)
+    view.message = message
+
