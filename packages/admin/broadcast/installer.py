@@ -7,7 +7,6 @@ from discord.ui import View, Button
 
 REPO       = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
 BRANCH     = "v3"
-# pip subdirectory syntax — points pip at the subfolder containing pyproject.toml
 GIT_URL    = f"git+https://github.com/{REPO}.git@{BRANCH}#subdirectory=packages/admin/broadcast"
 APP_PATH   = "broadcast"
 TOML_MARKER = f'path = "{APP_PATH}"'
@@ -19,7 +18,6 @@ TOML_ENTRY = (
     "enabled = true\n"
 )
 
-# Correct path: docker-compose mounts ./config to /code/admin_panel/config
 EXTRA_TOML = "/code/admin_panel/config/extra.toml"
 
 FOOTER         = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
@@ -58,7 +56,6 @@ def _remove_toml():
         return
     with open(EXTRA_TOML) as f:
         contents = f.read()
-    # Remove the comment line and the [[ballsdex.packages]] block together
     cleaned = re.sub(
         r"\n?# Broadcast Package\n\[\[ballsdex\.packages\]\][^\[]*path\s*=\s*\"broadcast\"[^\[]*",
         "", contents, flags=re.DOTALL,
