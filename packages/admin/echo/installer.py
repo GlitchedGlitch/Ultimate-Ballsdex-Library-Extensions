@@ -1,186 +1,193 @@
-import asyncio, base64, io, os, re, requests, traceback, discord
+"""
+Echo Package Installer v3
+"""
+
+import io, os, re, traceback, discord
 from discord.ui import View, Button, Modal, TextInput
 
-REPO = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
-BASE = "https://api.github.com/repos/{}/contents/packages/admin/echo/{}".format(REPO, "{}")
-PKG = "/code/ballsdex/packages/echo"
-CONFIG = "/code/config.yml"
-NAME_FILE = os.path.join(PKG, "name.txt")
-PACKAGE_ENTRY = "  - ballsdex.packages.echo"
-FILES = ("__init__.py", "cog.py")
-FOOTER = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
-FOOTER_TIMEOUT = FOOTER + " • Timed out"
+REPO        = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
+BRANCH      = "v3"
+GIT_URL     = f"git+https://github.com/{REPO}.git@{BRANCH}#subdirectory=packages/admin/echo"
+APP_PATH    = "echo"
+TOML_MARKER = f'path = "{APP_PATH}"'
+TOML_ENTRY  = (
+    "\n\n# Echo Package\n"
+    "[[ballsdex.packages]]\n"
+    f'location = "{GIT_URL}"\n'
+    f'path = "{APP_PATH}"\n'
+    "enabled = true\n"
+)
+
+EXTRA_TOML  = "/code/admin_panel/config/extra.toml"
+NAME_FILE   = "/code/admin_panel/config/echo_name.txt"
 DEFAULT_NAME = "echo"
 
-BAR_FILLED = "█"
-BAR_EMPTY  = "░"
-BAR_LEN    = 10
+FOOTER         = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
+FOOTER_TIMEOUT = FOOTER + " • Timed out"
+BAR_FILLED, BAR_EMPTY, BAR_LEN = "█", "░", 10
 
 
-def _bar(current: int, total: int) -> str:
-    filled = round(BAR_LEN * current / total)
-    pct = round(100 * current / total)
-    return f"`{BAR_FILLED * filled}{BAR_EMPTY * (BAR_LEN - filled)}` {pct}%"
+# ── Name helpers ──────────────────────────────────────────────────────────────
 
-
-def _progress_embed(title: str, steps: list, color: discord.Color) -> discord.Embed:
-    done_count = sum(1 for _, s in steps if s is True)
-    total = len(steps)
-    lines = []
-    for label, state in steps:
-        icon = {None: "⬜", True: "✅", False: "❌"}[state]
-        lines.append(f"{icon} {label}")
-    embed = discord.Embed(
-        title=title,
-        description="\n".join(lines) + f"\n\n{_bar(done_count, total)}",
-        color=color,
-    )
-    embed.set_footer(text=FOOTER)
-    return embed
-
-
-# ── Admin group + sync helpers ────────────────────────────────────────────────
-
-def _remove_echo_command(bot, cmd_name: str):
-    admin_cog = bot.get_cog("Admin")
-    if admin_cog and admin_cog.__cog_app_commands_group__:
-        group = admin_cog.__cog_app_commands_group__
-        if group.get_command(cmd_name):
-            group.remove_command(cmd_name)
-
-
-async def _sync_tree(bot):
-    """Sync global tree and all admin guild trees concurrently."""
-    from ballsdex.settings import settings
-    guild_syncs = [
-        bot.tree.sync(guild=discord.Object(id=gid))
-        for gid in settings.admin_guild_ids
-    ]
-    await asyncio.gather(bot.tree.sync(), *guild_syncs)
-
-
-# ── File helpers ──────────────────────────────────────────────────────────────
-
-def is_installed():
-    return os.path.isdir(PKG) and os.path.isfile(os.path.join(PKG, "cog.py"))
-
-
-def get_command_name() -> str:
+def _get_command_name() -> str:
     try:
-        with open(NAME_FILE, "r") as f:
+        with open(NAME_FILE) as f:
             name = f.read().strip()
             return name if name else DEFAULT_NAME
     except FileNotFoundError:
         return DEFAULT_NAME
 
 
-def save_command_name(name: str):
+def _save_command_name(name: str) -> None:
+    os.makedirs(os.path.dirname(NAME_FILE), exist_ok=True)
     with open(NAME_FILE, "w") as f:
         f.write(name.strip())
 
 
-def download_files():
-    for f in FILES:
-        resp = requests.get(BASE.format(f))
-        resp.raise_for_status()
-        content = base64.b64decode(resp.json()["content"]).decode()
-        with open(os.path.join(PKG, f), "w") as fh:
-            fh.write(content)
+# ── extra.toml helpers ────────────────────────────────────────────────────────
+
+def _toml_has_entry() -> bool:
+    try:
+        if not os.path.isfile(EXTRA_TOML):
+            return False
+        with open(EXTRA_TOML) as f:
+            return TOML_MARKER in f.read()
+    except OSError:
+        return False
 
 
-def add_to_config():
-    with open(CONFIG, "r") as f:
-        lines = f.readlines()
-    if any(PACKAGE_ENTRY.strip() in l for l in lines):
+def _write_toml():
+    os.makedirs(os.path.dirname(EXTRA_TOML), exist_ok=True)
+    if os.path.isfile(EXTRA_TOML):
+        with open(EXTRA_TOML) as f:
+            contents = f.read()
+        if TOML_MARKER in contents:
+            return
+        with open(EXTRA_TOML, "a") as f:
+            f.write(TOML_ENTRY)
+    else:
+        with open(EXTRA_TOML, "w") as f:
+            f.write(TOML_ENTRY.lstrip())
+
+
+def _remove_toml():
+    if not os.path.isfile(EXTRA_TOML):
         return
-    for i, line in enumerate(lines):
-        if "ballsdex.packages.trade" in line:
-            lines.insert(i + 1, PACKAGE_ENTRY + "\n")
-            break
-    with open(CONFIG, "w") as f:
-        f.writelines(lines)
-
-def remove_from_config():
-    with open(CONFIG, "r") as f:
-        lines = f.readlines()
-    lines = [l for l in lines if "ballsdex.packages.echo" not in l]
-    with open(CONFIG, "w") as f:
-        f.writelines(lines)
+    with open(EXTRA_TOML) as f:
+        contents = f.read()
+    cleaned = re.sub(
+        r"\n?# Echo Package\n\[\[ballsdex\.packages\]\][^\[]*path\s*=\s*\"echo\"[^\[]*",
+        "", contents, flags=re.DOTALL,
+    )
+    with open(EXTRA_TOML, "w") as f:
+        f.write(cleaned)
 
 
-def delete_files():
-    import shutil
-    if os.path.isdir(PKG):
-        shutil.rmtree(PKG)
+def is_installed() -> bool:
+    return _toml_has_entry()
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _bar(current: int, total: int) -> str:
+    filled = round(BAR_LEN * current / total)
+    return f"`{BAR_FILLED * filled}{BAR_EMPTY * (BAR_LEN - filled)}` {round(100 * current / total)}%"
+
+
+def _progress_embed(title: str, steps: list, color: discord.Color) -> discord.Embed:
+    done  = sum(1 for _, s in steps if s is True)
+    icons = {None: "⬜", True: "✅", False: "❌"}
+    lines = [f"{icons[s]} {label}" for label, s in steps]
+    e = discord.Embed(title=title, description="\n".join(lines) + f"\n\n{_bar(done, len(steps))}", color=color)
+    e.set_footer(text=FOOTER)
+    return e
 
 
 # ── Embeds ────────────────────────────────────────────────────────────────────
 
 def build_main_embed(installed: bool, color: discord.Color, cmd_name: str) -> discord.Embed:
-    embed = discord.Embed(
+    status = "✅ Registered in `extra.toml` — rebuild to activate" if installed else "❌ Not installed"
+    e = discord.Embed(
         title="Echo Package",
         description=(
             "Adds an admin echo command to your BallsDex instance.\n\n"
             "**Commands**\n"
-            f"• `/admin {cmd_name}` — send, edit or reply to messages as the bot\n\n"
+            f"• `/admin {cmd_name}` — send, edit, delete or reply to messages as the bot\n\n"
             "**Parameters**\n"
             "• `message` — text content to send or edit with\n"
-            "• `image` — file attachment to include\n"
+            "• `file` — file attachment to include\n"
             "• `embed` — wrap message in an embed\n"
             "• `channel` — target channel (works cross-server)\n"
-            "• `dm` — dms a specified user\n"
+            "• `dm` — DM a specified user\n"
             "• `reply` — message link to reply to\n"
-            "• `edit_message` — message link to edit instead of sending\n" 
-            "• `delete_message` — message link to delete the message\n\n"
+            "• `edit_message` — message link to edit instead of sending\n"
+            "• `delete_message` — message link to delete\n\n"
             f"**Command name:** `/admin {cmd_name}`\n"
-            f"**Status:** {'✅ Installed' if installed else '❌ Not installed'}"
+            f"**Status:** {status}"
         ),
         color=color,
     )
-    embed.set_footer(text=FOOTER)
-    return embed
+    e.set_footer(text=FOOTER)
+    return e
 
 
-def build_confirm_embed() -> discord.Embed:
-    embed = discord.Embed(
-        title="Delete Echo Package",
+def build_warning_embed() -> discord.Embed:
+    e = discord.Embed(
+        title="⚠️ Before Installing — Required Setup",
         description=(
-            "⚠️ **Are you sure you want to delete the Echo package?**\n\n"
-            "This will:\n"
-            "• Unload the package from the bot\n"
-            "• Remove `/admin echo` from Discord\n"
-            "• Delete all package files\n"
-            "• Remove it from `config.yml`\n\n"
-            "This action **cannot be undone** without reinstalling."
+            "The installer needs to write to `config/extra.toml`. "
+            "By default Docker mounts this folder as **read-only**, "
+            "so you must edit your `docker-compose.yml` first.\n\n"
+            "**Find these two lines** in both the `bot` and `admin-panel` services "
+            "and change `:ro` to `:rw`:\n"
+            "```yaml\n"
+            "- \"./config:/code/admin_panel/config:rw\"\n"
+            "- \"./extra:/code/extra:rw\"\n"
+            "```\n"
+            "Then restart your containers:\n"
+            "```\ndocker compose down\ndocker compose build\ndocker compose up -d\n```\n\n"
+            "Once done, click **Confirm Install** below.\n"
+            "If you have already done this, you can proceed immediately."
         ),
         color=discord.Color.orange(),
     )
-    embed.set_footer(text=FOOTER)
-    return embed
+    e.set_footer(text=FOOTER)
+    return e
+
+
+def build_confirm_remove_embed() -> discord.Embed:
+    e = discord.Embed(
+        title="Remove Echo Package",
+        description=(
+            "⚠️ **Are you sure?**\n\n"
+            "This will remove the entry from `config/extra.toml`.\n"
+            "The package will stop loading after the next rebuild.\n\n"
+            "The command name setting will be preserved."
+        ),
+        color=discord.Color.orange(),
+    )
+    e.set_footer(text=FOOTER)
+    return e
 
 
 def build_error_embed(action: str, error: str) -> discord.Embed:
     short = error[:1000] + "..." if len(error) > 1000 else error
-    embed = discord.Embed(
+    e = discord.Embed(
         title="An error occurred",
-        description=(
-            f"An error occurred when **{action}** the package!\n\n"
-            f"```\n{short}\n```\n\n"
-            "The full error is attached as a `.txt` file below."
-        ),
+        description=f"An error occurred when **{action}** the package!\n\n```\n{short}\n```\n\nFull error attached below.",
         color=discord.Color.red(),
     )
-    embed.set_footer(text=FOOTER)
-    return embed
+    e.set_footer(text=FOOTER)
+    return e
 
 
 def build_result_embed(title: str, description: str, color: discord.Color) -> discord.Embed:
-    embed = discord.Embed(title=title, description=description, color=color)
-    embed.set_footer(text=FOOTER)
-    return embed
+    e = discord.Embed(title=title, description=description, color=color)
+    e.set_footer(text=FOOTER)
+    return e
 
 
-# ── Name modal ────────────────────────────────────────────────────────────────
+# ── Rename modal ──────────────────────────────────────────────────────────────
 
 class CommandNameModal(Modal, title="Set Echo Command Name"):
     name_input = TextInput(
@@ -205,102 +212,136 @@ class CommandNameModal(Modal, title="Set Echo Command Name"):
             )
             return
 
-        # Acknowledge the modal immediately so Discord doesn't time out
         await interaction.response.defer()
 
         if not self.parent.installed:
-            # Not installed yet — just update the preview
+            # Not installed yet — just update the preview name
             self.parent.cmd_name = raw
+            _save_command_name(raw)
             await self.parent.message.edit(
                 embed=build_main_embed(False, discord.Color.greyple(), raw),
                 view=self.parent,
             )
             return
 
-        # ── Installed: show rename progress ───────────────────────────────────
+        # Installed — save the name so it takes effect on next rebuild
         old_name = self.parent.cmd_name
-        RENAME_STEPS = [
-            f"Removing /admin {old_name}",
-            "Unloading extension",
-            "Saving new command name",
-            "Reloading extension",
-            "Syncing command tree",
-        ]
-        steps = [(s, None) for s in RENAME_STEPS]
-
-        async def update(i: int, success: bool = True):
-            steps[i] = (steps[i][0], success)
-            await self.parent.message.edit(
-                embed=_progress_embed(
-                    f"Renaming to /admin {raw}…", steps, discord.Color.blurple()
-                ),
-                view=None,
-            )
-
+        _save_command_name(raw)
+        self.parent.cmd_name = raw
+        self.parent.done = True
+        self.parent.stop()
         await self.parent.message.edit(
-            embed=_progress_embed(
-                f"Renaming to /admin {raw}…", steps, discord.Color.blurple()
+            embed=build_result_embed(
+                "Command Name Updated",
+                (
+                    f"The command name has been changed from `{old_name}` to `{raw}`.\n\n"
+                    "Rebuild and restart for the change to take effect:\n"
+                    "```\ndocker compose build\ndocker compose up -d\n```\n"
+                    "After the rebuild it will appear as `/admin {raw}`."
+                ).replace("{raw}", raw),
+                discord.Color.blurple(),
             ),
             view=None,
         )
 
+
+# ── Warning gate ──────────────────────────────────────────────────────────────
+
+class InstallWarningView(View):
+    def __init__(self, parent: "EchoInstallerView"):
+        super().__init__(timeout=120)
+        self.parent = parent
+
+    async def on_timeout(self):
+        if not self.parent.done:
+            color = discord.Color.gold() if self.parent.installed else discord.Color.greyple()
+            await self.parent.message.edit(
+                embed=build_main_embed(self.parent.installed, color, self.parent.cmd_name),
+                view=self.parent,
+            )
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.parent.ctx.author.id:
+            await interaction.response.send_message("This menu is not for you.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="Confirm Install", style=discord.ButtonStyle.success, emoji="✅")
+    async def confirm_button(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        steps = [("Writing to config/extra.toml", None)]
+
+        async def update(i: int, success: bool = True):
+            steps[i] = (steps[i][0], success)
+            await self.parent.message.edit(
+                embed=_progress_embed("Installing Echo Package…", steps, discord.Color.blurple()),
+                view=None,
+            )
+
+        await self.parent.message.edit(
+            embed=_progress_embed("Installing Echo Package…", steps, discord.Color.blurple()),
+            view=None,
+        )
+
         try:
-            # 1. Remove old command from admin group
-            _remove_echo_command(self.parent.bot, old_name)
+            _write_toml()
+            _save_command_name(self.parent.cmd_name)
             await update(0)
-
-            # 2. Unload — so load_extension works cleanly below
-            try:
-                await self.parent.bot.unload_extension("ballsdex.packages.echo")
-            except Exception:
-                pass
-            await update(1)
-
-            # 3. Save new name so __init__.py picks it up on next load
-            save_command_name(raw)
-            self.parent.cmd_name = raw
-            await update(2)
-
-            # 4. Load fresh — avoids the "already loaded" error
-            await self.parent.bot.load_extension("ballsdex.packages.echo")
-            await update(3)
-
-            # 5. Sync
-            await _sync_tree(self.parent.bot)
-            await update(4)
-
+            self.parent.installed = True
+            self.parent._update_buttons()
+            self.parent.done = True
+            self.stop()
             await self.parent.message.edit(
                 embed=build_result_embed(
-                    "Successfully Renamed",
-                    (
-                        f"Command renamed from `/admin {old_name}` to `/admin {raw}`.\n\n"
-                        "Run this installer again to update, rename or remove the package."
-                    ),
-                    discord.Color.blurple(),
+                    "Entry Added — Rebuild Required",
+                    f"Added to `config/extra.toml` with command name `/admin {self.parent.cmd_name}`.\n\n"
+                    "Now rebuild and restart your bot to finish the install:\n"
+                    "```\ndocker compose build\ndocker compose up -d\n```\n"
+                    "After the rebuild, `echo` will appear in the packages loaded log.\n\n"
+                    "Use the **Rename** button before installing to change the command name.",
+                    discord.Color.green(),
                 ),
                 view=None,
             )
+        except OSError as e:
             self.parent.done = True
-            self.parent.stop()
-
+            self.stop()
+            steps[0] = (steps[0][0], False)
+            await self.parent.message.edit(
+                embed=build_result_embed(
+                    "Permission Denied",
+                    f"Could not write to `config/extra.toml` — the folder is still **read-only** (`{e.strerror}`).\n\n"
+                    "Make sure you edited `docker-compose.yml` and restarted the containers first:\n"
+                    "```yaml\n- \"./config:/code/admin_panel/config:rw\"\n- \"./extra:/code/extra:rw\"\n```\n"
+                    "```\ndocker compose down\ndocker compose build\ndocker compose up -d\n```\n"
+                    "Then run the installer eval again.",
+                    discord.Color.red(),
+                ),
+                view=None,
+            )
         except Exception:
             err = traceback.format_exc()
-            for i, (label, state) in enumerate(steps):
-                if state is None:
-                    steps[i] = (label, False)
-                    break
-            f = discord.File(io.BytesIO(err.encode()), filename="rename_error.txt")
-            await self.parent.message.edit(
-                embed=build_error_embed("renaming", err), view=None
-            )
-            await interaction.followup.send(file=f)
             self.parent.done = True
-            self.parent.stop()
+            self.stop()
+            steps[0] = (steps[0][0], False)
+            await self.parent.message.edit(embed=build_error_embed("installing", err), view=None)
+            await interaction.followup.send(
+                file=discord.File(io.BytesIO(err.encode()), filename="install_error.txt")
+            )
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary, emoji="↩️")
+    async def cancel_button(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        color = discord.Color.gold() if self.parent.installed else discord.Color.greyple()
+        await self.parent.message.edit(
+            embed=build_main_embed(self.parent.installed, color, self.parent.cmd_name),
+            view=self.parent,
+        )
 
 
-# ── Confirm delete ────────────────────────────────────────────────────────────
+# ── Confirm remove ────────────────────────────────────────────────────────────
 
-class ConfirmDeleteView(View):
+class ConfirmRemoveView(View):
     def __init__(self, parent: "EchoInstallerView"):
         super().__init__(timeout=60)
         self.parent = parent
@@ -319,64 +360,22 @@ class ConfirmDeleteView(View):
             return False
         return True
 
-    @discord.ui.button(label="Yes, delete it", style=discord.ButtonStyle.danger, emoji="🗑️")
+    @discord.ui.button(label="Yes, remove it", style=discord.ButtonStyle.danger, emoji="🗑️")
     async def confirm_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
-
-        DELETE_STEPS = [
-            "Removing command from Discord",
-            "Unloading extension",
-            "Syncing command tree",
-            "Deleting package files",
-            "Removing from config.yml",
-        ]
-        steps = [(s, None) for s in DELETE_STEPS]
-
-        async def update(i: int, success: bool = True):
-            steps[i] = (steps[i][0], success)
-            await self.parent.message.edit(
-                embed=_progress_embed("Deleting Echo Package…", steps, discord.Color.red()),
-                view=None,
-            )
-
-        await self.parent.message.edit(
-            embed=_progress_embed("Deleting Echo Package…", steps, discord.Color.red()),
-            view=None,
-        )
-
         try:
-            _remove_echo_command(self.parent.bot, self.parent.cmd_name)
-            await update(0)
-
-            try:
-                await self.parent.bot.unload_extension("ballsdex.packages.echo")
-            except Exception:
-                pass
-            await update(1)
-
-            await _sync_tree(self.parent.bot)
-            await update(2)
-
-            delete_files()
-            await update(3)
-
-            remove_from_config()
-            await update(4)
-
+            _remove_toml()
             self.parent.installed = False
+            self.parent._update_buttons()
             self.parent.done = True
             self.stop()
             await self.parent.message.edit(
                 embed=build_result_embed(
-                    "Successfully Deleted",
-                    (
-                        "The **Echo Package** has been removed.\n\n"
-                        "• `/admin echo` removed from Discord\n"
-                        "• All package files deleted\n"
-                        "• Removed from `config.yml`\n\n"
-                        "Restart the bot to fully apply the config change.\n\n"
-                        "Run this installer again to reinstall."
-                    ),
+                    "Entry Removed",
+                    "Removed from `config/extra.toml`.\n\n"
+                    "Rebuild to fully uninstall:\n"
+                    "```\ndocker compose build\ndocker compose up -d\n```\n"
+                    "The command name setting has been preserved.",
                     discord.Color.red(),
                 ),
                 view=None,
@@ -385,13 +384,10 @@ class ConfirmDeleteView(View):
             err = traceback.format_exc()
             self.parent.done = True
             self.stop()
-            for i, (label, state) in enumerate(steps):
-                if state is None:
-                    steps[i] = (label, False)
-                    break
-            f = discord.File(io.BytesIO(err.encode()), filename="delete_error.txt")
-            await self.parent.message.edit(embed=build_error_embed("deleting", err), view=None)
-            await interaction.followup.send(file=f)
+            await self.parent.message.edit(embed=build_error_embed("removing", err), view=None)
+            await interaction.followup.send(
+                file=discord.File(io.BytesIO(err.encode()), filename="remove_error.txt")
+            )
 
     @discord.ui.button(label="No, go back", style=discord.ButtonStyle.secondary, emoji="↩️")
     async def cancel_button(self, interaction: discord.Interaction, button: Button):
@@ -408,26 +404,22 @@ class ConfirmDeleteView(View):
 class EchoInstallerView(View):
     def __init__(self, bot, ctx, installed: bool, cmd_name: str):
         super().__init__(timeout=180)
-        self.bot = bot
-        self.ctx = ctx
+        self.bot = bot; self.ctx = ctx
         self.installed = installed
         self.cmd_name = cmd_name
-        self.done = False
-        self.message = None
+        self.done = False; self.message = None
         self._update_buttons()
 
     def _update_buttons(self):
         for c in self.children:
             if c.label == "Install":
                 c.disabled = self.installed
-            elif c.label in ("Update", "Delete"):
+            elif c.label == "Remove":
                 c.disabled = not self.installed
 
     async def on_timeout(self):
-        if self.done:
-            return
-        for c in self.children:
-            c.disabled = True
+        if self.done: return
+        for c in self.children: c.disabled = True
         if self.message:
             embed = build_main_embed(self.installed, discord.Color.dark_grey(), self.cmd_name)
             embed.set_footer(text=FOOTER_TIMEOUT)
@@ -442,150 +434,51 @@ class EchoInstallerView(View):
     @discord.ui.button(label="Install", style=discord.ButtonStyle.success, emoji="📥")
     async def install_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
-
-        INSTALL_STEPS = [
-            "Creating package folder",
-            "Downloading files",
-            "Saving command name",
-            "Adding to config.yml",
-            "Loading extension",
-            "Syncing command tree",
-        ]
-        steps = [(s, None) for s in INSTALL_STEPS]
-
-        async def update(i: int, success: bool = True):
-            steps[i] = (steps[i][0], success)
-            await self.message.edit(
-                embed=_progress_embed("Installing Echo Package…", steps, discord.Color.blurple()),
-                view=None,
-            )
-
-        await self.message.edit(
-            embed=_progress_embed("Installing Echo Package…", steps, discord.Color.blurple()),
-            view=None,
-        )
-
-        try:
-            os.makedirs(PKG, exist_ok=True)
-            await update(0)
-
-            download_files()
-            await update(1)
-
-            save_command_name(self.cmd_name)
-            await update(2)
-
-            add_to_config()
-            await update(3)
-
-            await self.bot.load_extension("ballsdex.packages.echo")
-            await update(4)
-
-            await _sync_tree(self.bot)
-            await update(5)
-
-            self.done = True
-            self.stop()
-            await self.message.edit(
-                embed=build_result_embed(
-                    "Successfully Installed",
-                    (
-                        f"The **Echo Package** has been installed as `/admin {self.cmd_name}`.\n\n"
-                        "Run this installer again to update, rename or remove the package."
-                    ),
-                    discord.Color.green(),
-                ),
-                view=None,
-            )
-        except Exception:
-            err = traceback.format_exc()
-            self.done = True
-            self.stop()
-            for i, (label, state) in enumerate(steps):
-                if state is None:
-                    steps[i] = (label, False)
-                    break
-            f = discord.File(io.BytesIO(err.encode()), filename="install_error.txt")
-            await self.message.edit(embed=build_error_embed("installing", err), view=None)
-            await interaction.followup.send(file=f)
-
-    @discord.ui.button(label="Update", style=discord.ButtonStyle.primary, emoji="🔄")
-    async def update_button(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.defer()
-
-        UPDATE_STEPS = [
-            "Downloading latest files",
-            "Reloading extension",
-            "Syncing command tree",
-        ]
-        steps = [(s, None) for s in UPDATE_STEPS]
-
-        async def update(i: int, success: bool = True):
-            steps[i] = (steps[i][0], success)
-            await self.message.edit(
-                embed=_progress_embed("Updating Echo Package…", steps, discord.Color.blurple()),
-                view=None,
-            )
-
-        await self.message.edit(
-            embed=_progress_embed("Updating Echo Package…", steps, discord.Color.blurple()),
-            view=None,
-        )
-
-        try:
-            download_files()
-            await update(0)
-
-            loaded = "ballsdex.packages.echo" in self.bot.extensions
-            if loaded:
-                await self.bot.reload_extension("ballsdex.packages.echo")
-            else:
-                await self.bot.load_extension("ballsdex.packages.echo")
-            await update(1)
-
-            await _sync_tree(self.bot)
-            await update(2)
-
-            self.done = True
-            self.stop()
-            await self.message.edit(
-                embed=build_result_embed(
-                    "Successfully Updated",
-                    (
-                        "The **Echo Package** has been updated and reloaded.\n\n"
-                        "Run this installer again to update, rename or remove the package."
-                    ),
-                    discord.Color.blue(),
-                ),
-                view=None,
-            )
-        except Exception:
-            err = traceback.format_exc()
-            self.done = True
-            self.stop()
-            for i, (label, state) in enumerate(steps):
-                if state is None:
-                    steps[i] = (label, False)
-                    break
-            f = discord.File(io.BytesIO(err.encode()), filename="update_error.txt")
-            await self.message.edit(embed=build_error_embed("updating", err), view=None)
-            await interaction.followup.send(file=f)
+        await self.message.edit(embed=build_warning_embed(), view=InstallWarningView(self))
 
     @discord.ui.button(label="Rename", style=discord.ButtonStyle.secondary, emoji="✏️")
     async def rename_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(CommandNameModal(self))
 
-    @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger, emoji="🗑️")
-    async def delete_button(self, interaction: discord.Interaction, button: Button):
+    @discord.ui.button(label="Remove", style=discord.ButtonStyle.danger, emoji="🗑️")
+    async def remove_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
-        await self.message.edit(embed=build_confirm_embed(), view=ConfirmDeleteView(self))
+        await self.message.edit(embed=build_confirm_remove_embed(), view=ConfirmRemoveView(self))
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-installed = is_installed()
-cmd_name = get_command_name() if installed else DEFAULT_NAME
-view = EchoInstallerView(bot, ctx, installed, cmd_name)
-initial_color = discord.Color.gold() if installed else discord.Color.greyple()
-message = await ctx.send(embed=build_main_embed(installed, initial_color, cmd_name), view=view)
-view.message = message
+def _is_v2() -> bool:
+    try:
+        from django.apps import apps
+        apps.check_apps_ready()
+        return False
+    except Exception:
+        pass
+    try:
+        import tortoise  # noqa: F401
+        return True
+    except ImportError:
+        pass
+    return False
+
+if _is_v2():
+    await ctx.send(
+        embed=discord.Embed(
+            title="Incompatible Version",
+            description=(
+                "This installer is for **BallsDex v3** only.\n\n"
+                "Your instance appears to be running **v2**.\n\n"
+                "Please use the **v2 branch** of this package instead, or update "
+                "to v3 before installing."
+            ),
+            color=discord.Color.red(),
+        ).set_footer(text=FOOTER)
+    )
+else:
+    installed = is_installed()
+    cmd_name  = _get_command_name()
+    view      = EchoInstallerView(bot, ctx, installed, cmd_name)
+    color     = discord.Color.gold() if installed else discord.Color.greyple()
+    message   = await ctx.send(embed=build_main_embed(installed, color, cmd_name), view=view)
+    view.message = message
