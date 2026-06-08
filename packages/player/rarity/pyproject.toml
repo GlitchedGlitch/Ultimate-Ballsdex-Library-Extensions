@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ballsdex-rarity"
+version = "1.0.0"
+description = "Rarity list command for BallsDex v3. Adds a command to see a rarity list of all enabled balls in the dex. This includes a search option where you can search for specific balls or balls within a rarity group :3"
+license = "MIT"
+authors = [{ name = "Glitch" }]
+readme = "README.md"
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["rarity*"] 
