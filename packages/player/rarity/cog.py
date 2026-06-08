@@ -1,13 +1,5 @@
 """
-Rarity package for BallsDex.
-
-Adds /{players_group} rarity — shows the rarity list of all enabled balls.
-
-Features:
-  - search: by ball name OR rarity value on the same parameter
-  - reverse: sort highest to lowest
-  - ephemeral: show only to you
-  - BallsDex FieldPageSource/Pages paginator
+Rarity package for BallsDex
 """
 
 from __future__ import annotations
