@@ -1,4 +1,4 @@
-# Echo Package 
+# Leave Package 
 ## What is this?
 This package allows you to make the dex leave a server. Yea that's all
 
