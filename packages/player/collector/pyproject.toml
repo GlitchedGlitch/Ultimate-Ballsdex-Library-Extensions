@@ -13,6 +13,7 @@ dependencies = []
 
 [project.urls]
 Repository = "https://github.com/GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
+Package = "https://github.com/GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions/tree/v3/packages/player/collector"
 
 [tool.setuptools.packages.find]
 where = ["."]
