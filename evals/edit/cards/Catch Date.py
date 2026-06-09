@@ -4,8 +4,4 @@
 # use a discord timestamp generator for this.
 
 .eval
-from datetime import datetime
-
-ball = await BallInstance.get(id=0xBallIDInCardHere)
-ball.catch_date = datetime.fromtimestamp(TimestampInNumbersHere)
-await ball.save()
+from datetime import datetime; ball=await BallInstance.objects.aget(id=0xBallIDInCardHere); ball.catch_date=datetime.fromtimestamp(TimestampInNumbersHere); await ball.asave()
