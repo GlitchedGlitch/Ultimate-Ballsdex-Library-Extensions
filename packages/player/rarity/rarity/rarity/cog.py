@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import discord
 from discord import app_commands
 from discord.ext import commands
+from discord.ui import ActionRow, Button, button
 
 from bd_models.models import Ball, balls as balls_cache
 from ballsdex.core.discord import LayoutView
@@ -44,15 +45,24 @@ class RarityCog(commands.Cog):
 
 
 class RarityItemFormatter(ItemFormatter):
-    """Custom ItemFormatter that properly clears items between pages."""
+    """Custom ItemFormatter that properly clears items between pages while keeping controls."""
     
     async def format_page(self, page):
-        # Remove ALL items after position (not just items > position)
-        items_to_remove = list(self.item.children[self.position :])
+        # Find the index where controls start (they're at the end after position)
+        # We want to remove only the content items, not the control buttons
+        children_list = list(self.item.children)
+        
+        # Remove items after position, but keep ActionRows (which contain buttons)
+        items_to_remove = []
+        for i, child in enumerate(children_list[self.position:], start=self.position):
+            # Keep ActionRows (they contain the control buttons)
+            if not isinstance(child, ActionRow):
+                items_to_remove.append(child)
+        
         for item in items_to_remove:
             self.item.remove_item(item)
         
-        # Add new items
+        # Add new page items
         for section in page:
             self.item.add_item(section)
         
@@ -61,6 +71,38 @@ class RarityItemFormatter(ItemFormatter):
             self.item.add_item(
                 discord.ui.TextDisplay(f"-# Page {self.menu.current_page + 1}/{self.menu.source.get_max_pages()}")
             )
+
+
+class RarityControls(ActionRow):
+    """Control buttons for rarity pagination."""
+    
+    def __init__(self, menu):
+        super().__init__()
+        self.menu = menu
+    
+    @button(label="≪", style=discord.ButtonStyle.grey)
+    async def go_to_first_page(self, interaction: discord.Interaction, button: Button):
+        await self.menu.show_page(interaction, 0)
+    
+    @button(label="Back", style=discord.ButtonStyle.blurple)
+    async def go_to_previous_page(self, interaction: discord.Interaction, button: Button):
+        await self.menu.show_page(interaction, self.menu.current_page - 1)
+    
+    @button(label="Next", style=discord.ButtonStyle.blurple)
+    async def go_to_next_page(self, interaction: discord.Interaction, button: Button):
+        await self.menu.show_page(interaction, self.menu.current_page + 1)
+    
+    @button(label="≫", style=discord.ButtonStyle.grey)
+    async def go_to_last_page(self, interaction: discord.Interaction, button: Button):
+        await self.menu.show_page(interaction, self.menu.source.get_max_pages() - 1)
+    
+    @button(label="Quit", style=discord.ButtonStyle.danger)
+    async def quit_button(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        for item in self.menu.view.walk_children():
+            if hasattr(item, "disabled"):
+                item.disabled = True  # type: ignore
+        await interaction.edit_original_response(view=self.menu.view)
 
 
 def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
@@ -178,9 +220,16 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
         view.add_item(container)
 
         source = ListSource(pages)
+        # Items are inserted at position 2 (after title + separator)
+        # Use the custom formatter that properly clears items while keeping controls
         formatter = RarityItemFormatter(container, position=2)
         menu = Menu(bot, view, source, formatter)
-        await menu.init()
+        
+        # Add controls inside the container at position 2 (before content items)
+        controls = RarityControls(menu)
+        container.add_item(controls)
+        
+        await menu.init(container=container, position=3)
 
         await interaction.followup.send(view=view, ephemeral=ephemeral)
 
