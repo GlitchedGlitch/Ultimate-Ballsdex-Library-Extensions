@@ -52,7 +52,7 @@ class RarityItemFormatter(ItemFormatter):
         # We want to remove only the content items, not the control buttons
         children_list = list(self.item.children)
         
-        # Remove items after position, but keep ActionRows (which contain the quit button)
+        # Remove items after position, but keep ActionRows (which contain the controls)
         items_to_remove = []
         for i, child in enumerate(children_list[self.position:], start=self.position):
             # Keep ActionRows (they contain the control buttons)
@@ -71,22 +71,6 @@ class RarityItemFormatter(ItemFormatter):
             self.item.add_item(
                 discord.ui.TextDisplay(f"-# Page {self.menu.current_page + 1}/{self.menu.source.get_max_pages()}")
             )
-
-
-class QuitButtonRow(ActionRow):
-    """Quit button for rarity pagination."""
-    
-    def __init__(self, menu):
-        super().__init__()
-        self.menu = menu
-    
-    @button(label="Quit", style=discord.ButtonStyle.danger)
-    async def quit_button(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.defer()
-        for item in self.menu.view.walk_children():
-            if hasattr(item, "disabled"):
-                item.disabled = True  # type: ignore
-        await interaction.edit_original_response(view=self.menu.view)
 
 
 def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
@@ -187,28 +171,39 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
             )
             return
 
+        # Chunk into pages of GROUPS_PER_PAGE
         pages: list[list[discord.ui.Item]] = [
             all_items[i : i + GROUPS_PER_PAGE]
             for i in range(0, len(all_items), GROUPS_PER_PAGE)
         ]
 
+        # Build the LayoutView with a Container
         view = LayoutView()
         container = discord.ui.Container()
 
+        # Title section — always visible, position 0
         container.add_item(discord.ui.TextDisplay(f"# {plural} Rarity List"))
         container.add_item(discord.ui.Separator())
 
         view.add_item(container)
 
         source = ListSource(pages)
+        # Items are inserted at position 2 (after title + separator)
         formatter = RarityItemFormatter(container, position=2)
         menu = Menu(bot, view, source, formatter)
 
-        await menu.init()
+        # Initialize menu with container, buttons will be added at the end
+        await menu.init(container=container, position=None)
 
-        quit_button_row = QuitButtonRow(menu)
-        view.add_item(quit_button_row)
-        
+        # Add quit button to the controls row
+        @menu.controls.button(label="Quit", style=discord.ButtonStyle.danger)
+        async def quit_button(interaction: discord.Interaction, button: Button):
+            await interaction.response.defer()
+            for item in menu.view.walk_children():
+                if hasattr(item, "disabled"):
+                    item.disabled = True  # type: ignore
+            await interaction.edit_original_response(view=menu.view)
+
         await interaction.followup.send(view=view, ephemeral=ephemeral)
 
     @rarity.autocomplete("search")
