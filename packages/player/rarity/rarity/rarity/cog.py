@@ -178,11 +178,9 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
         view.add_item(container)
 
         source = ListSource(pages)
-        # Items are inserted at position 2 (after title + separator)
-        # Use the custom formatter that properly clears items
         formatter = RarityItemFormatter(container, position=2)
         menu = Menu(bot, view, source, formatter)
-        await menu.init(container=container)
+        await menu.init()
 
         await interaction.followup.send(view=view, ephemeral=ephemeral)
 
