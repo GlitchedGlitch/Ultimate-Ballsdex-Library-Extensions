@@ -14,7 +14,7 @@ from discord.ext import commands
 from discord.ui import ActionRow, Button, button
 
 from bd_models.models import Ball, balls as balls_cache
-from ballsdex.core.discord import LayoutView, View
+from ballsdex.core.discord import LayoutView
 from ballsdex.core.utils.menus import Menu
 from ballsdex.core.utils.menus.source import ListSource
 from ballsdex.core.utils.menus.formatter import ItemFormatter
@@ -47,19 +47,20 @@ class RarityCog(commands.Cog):
 class RarityItemFormatter(ItemFormatter):
     """Custom ItemFormatter that keeps buttons at the bottom permanently."""
     
-    def __init__(self, item, position: int, quit_button=None, footer: bool = True):
-        super().__init__(item, position, footer)
-        self.quit_button = quit_button
-    
     async def format_page(self, page):
         children_list = list(self.item.children)
         
         # Keep only the header and separator (first 2 items)
         items_to_keep = children_list[:self.position]
         
-        # Remove everything after position
-        for child in list(self.item.children[self.position:]):
-            self.item.remove_item(child)
+        # Remove everything after position except ActionRows (buttons)
+        items_to_remove = []
+        for child in children_list[self.position:]:
+            if not isinstance(child, ActionRow):
+                items_to_remove.append(child)
+        
+        for item in items_to_remove:
+            self.item.remove_item(item)
         
         # Add new page items
         for section in page:
@@ -70,11 +71,6 @@ class RarityItemFormatter(ItemFormatter):
             self.item.add_item(
                 discord.ui.TextDisplay(f"-# Page {self.menu.current_page + 1}/{self.menu.source.get_max_pages()}")
             )
-        
-        # Add controls and quit button at the very end
-        self.item.add_item(self.menu.controls)
-        if self.quit_button:
-            self.item.add_item(self.quit_button)
 
 
 class RarityView(LayoutView):
@@ -225,23 +221,15 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
         view.add_item(container)
 
         source = ListSource(pages)
-        menu = Menu(bot, view, source)
-        
-        # Create quit button with reference to view
-        quit_row = QuitButtonRow(view)
-        
-        # Create formatter that keeps buttons at bottom
-        formatter = RarityItemFormatter(
-            container, 
-            position=2,
-            quit_button=quit_row,
-            footer=True
-        )
-        menu.formatters = (formatter,)
-        formatter.configure(menu)
+        formatter = RarityItemFormatter(container, position=2)
+        menu = Menu(bot, view, source, formatter)
 
-        # Initialize menu
-        await menu.init(container=container, position=None)
+        # Initialize menu with container, buttons will be added inside container
+        await menu.init(container=container, position=2)
+
+        # Add quit button row after pagination controls
+        quit_row = QuitButtonRow(view)
+        container.add_item(quit_row)
 
         await interaction.followup.send(view=view, ephemeral=ephemeral)
 
