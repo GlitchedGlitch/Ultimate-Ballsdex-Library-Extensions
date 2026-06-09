@@ -45,21 +45,28 @@ class RarityCog(commands.Cog):
 
 
 class RarityItemFormatter(ItemFormatter):
-    """Custom ItemFormatter that properly clears items between pages while keeping controls."""
+    """Custom ItemFormatter that properly clears items between pages while keeping controls at the bottom."""
+    
+    def __init__(self, item, position: int, footer: bool = True, button_count: int = 2):
+        super().__init__(item, position, footer)
+        self.button_count = button_count  # Number of button rows to preserve at the end
     
     async def format_page(self, page):
         children_list = list(self.item.children)
         
-        # Find where ActionRows start (they contain buttons and should be preserved)
+        # Keep track of the button rows (last N items are ActionRows with buttons)
+        buttons_to_keep = children_list[-self.button_count:] if self.button_count > 0 else []
+        
+        # Remove items from position onwards, except the buttons at the end
         items_to_remove = []
-        for child in children_list[self.position:]:
-            if not isinstance(child, ActionRow):
+        for i, child in enumerate(children_list[self.position:], start=self.position):
+            if child not in buttons_to_keep:
                 items_to_remove.append(child)
         
         for item in items_to_remove:
             self.item.remove_item(item)
         
-        # Add new page items
+        # Add new page items (before the buttons)
         for section in page:
             self.item.add_item(section)
         
@@ -202,11 +209,12 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
 
         source = ListSource(pages)
         # Items are inserted at position 2 (after title + separator)
-        formatter = RarityItemFormatter(container, position=2)
+        # button_count=2 means we preserve 2 ActionRows (pagination + quit button)
+        formatter = RarityItemFormatter(container, position=2, button_count=2)
         menu = Menu(bot, view, source, formatter)
 
-        # Initialize menu with container, buttons will be added to container
-        await menu.init(container=container, position=2)
+        # Initialize menu - buttons go to the end of the container
+        await menu.init(container=container, position=None)
 
         # Add quit button row after pagination controls
         quit_row = QuitButtonRow(menu)
