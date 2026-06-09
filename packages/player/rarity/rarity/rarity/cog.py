@@ -45,36 +45,43 @@ class RarityCog(commands.Cog):
 
 
 class RarityItemFormatter(ItemFormatter):
-    """Custom ItemFormatter that properly clears items between pages while keeping controls at the bottom."""
+    """Custom ItemFormatter that keeps buttons at the bottom permanently."""
     
-    def __init__(self, item, position: int, footer: bool = True, button_count: int = 2):
+    def __init__(self, item, position: int, controls=None, quit_row=None, footer: bool = True):
         super().__init__(item, position, footer)
-        self.button_count = button_count  # Number of button rows to preserve at the end
+        self.controls = controls
+        self.quit_row = quit_row
     
     async def format_page(self, page):
         children_list = list(self.item.children)
         
-        # Keep track of the button rows (last N items are ActionRows with buttons)
-        buttons_to_keep = children_list[-self.button_count:] if self.button_count > 0 else []
+        # Keep only the header and separator (first 2 items)
+        items_to_keep = children_list[:self.position]
         
-        # Remove items from position onwards, except the buttons at the end
-        items_to_remove = []
-        for i, child in enumerate(children_list[self.position:], start=self.position):
-            if child not in buttons_to_keep:
-                items_to_remove.append(child)
+        # Remove everything after position except controls and quit button
+        for child in children_list[self.position:]:
+            if child not in (self.controls, self.quit_row):
+                self.item.remove_item(child)
         
-        for item in items_to_remove:
-            self.item.remove_item(item)
-        
-        # Add new page items (before the buttons)
+        # Add new page items
         for section in page:
             self.item.add_item(section)
         
-        # Add footer
+        # Add footer if needed
         if self.footer and self.menu.source.get_max_pages() > 1:
             self.item.add_item(
                 discord.ui.TextDisplay(f"-# Page {self.menu.current_page + 1}/{self.menu.source.get_max_pages()}")
             )
+        
+        # Ensure controls and quit button are always at the end
+        # Remove and re-add them to guarantee they're at the bottom
+        if self.controls in self.item.children:
+            self.item.remove_item(self.controls)
+        if self.quit_row in self.item.children:
+            self.item.remove_item(self.quit_row)
+        
+        self.item.add_item(self.controls)
+        self.item.add_item(self.quit_row)
 
 
 class QuitButtonRow(ActionRow):
@@ -208,16 +215,26 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
         view.add_item(container)
 
         source = ListSource(pages)
-        # Items are inserted at position 2 (after title + separator)
-        # button_count=2 means we preserve 2 ActionRows (pagination + quit button)
-        formatter = RarityItemFormatter(container, position=2, button_count=2)
-        menu = Menu(bot, view, source, formatter)
-
-        # Initialize menu - buttons go to the end of the container
-        await menu.init(container=container, position=None)
-
-        # Add quit button row after pagination controls
+        menu = Menu(bot, view, source)
+        
+        # Create quit button
         quit_row = QuitButtonRow(menu)
+        
+        # Create formatter that keeps buttons at bottom
+        formatter = RarityItemFormatter(
+            container, 
+            position=2,
+            controls=menu.controls,
+            quit_row=quit_row,
+            footer=True
+        )
+        menu.formatters = (formatter,)
+        formatter.configure(menu)
+
+        # Initialize menu
+        await menu.init(container=container, position=2)
+        
+        # Add quit button
         container.add_item(quit_row)
 
         await interaction.followup.send(view=view, ephemeral=ephemeral)
