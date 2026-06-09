@@ -14,7 +14,7 @@ from discord.ext import commands
 from discord.ui import ActionRow, Button, button
 
 from bd_models.models import Ball, balls as balls_cache
-from ballsdex.core.discord import LayoutView
+from ballsdex.core.discord import LayoutView, View
 from ballsdex.core.utils.menus import Menu
 from ballsdex.core.utils.menus.source import ListSource
 from ballsdex.core.utils.menus.formatter import ItemFormatter
@@ -47,10 +47,9 @@ class RarityCog(commands.Cog):
 class RarityItemFormatter(ItemFormatter):
     """Custom ItemFormatter that keeps buttons at the bottom permanently."""
     
-    def __init__(self, item, position: int, controls=None, quit_row=None, footer: bool = True):
+    def __init__(self, item, position: int, quit_button=None, footer: bool = True):
         super().__init__(item, position, footer)
-        self.controls = controls
-        self.quit_row = quit_row
+        self.quit_button = quit_button
     
     async def format_page(self, page):
         children_list = list(self.item.children)
@@ -58,10 +57,9 @@ class RarityItemFormatter(ItemFormatter):
         # Keep only the header and separator (first 2 items)
         items_to_keep = children_list[:self.position]
         
-        # Remove everything after position except controls and quit button
-        for child in children_list[self.position:]:
-            if child not in (self.controls, self.quit_row):
-                self.item.remove_item(child)
+        # Remove everything after position
+        for child in list(self.item.children[self.position:]):
+            self.item.remove_item(child)
         
         # Add new page items
         for section in page:
@@ -73,31 +71,43 @@ class RarityItemFormatter(ItemFormatter):
                 discord.ui.TextDisplay(f"-# Page {self.menu.current_page + 1}/{self.menu.source.get_max_pages()}")
             )
         
-        # Ensure controls and quit button are always at the end
-        # Remove and re-add them to guarantee they're at the bottom
-        if self.controls in self.item.children:
-            self.item.remove_item(self.controls)
-        if self.quit_row in self.item.children:
-            self.item.remove_item(self.quit_row)
-        
-        self.item.add_item(self.controls)
-        self.item.add_item(self.quit_row)
+        # Add controls and quit button at the very end
+        self.item.add_item(self.menu.controls)
+        if self.quit_button:
+            self.item.add_item(self.quit_button)
+
+
+class RarityView(LayoutView):
+    """Custom view with permission checking."""
+    
+    def __init__(self, user_id: int, *, timeout: float | None = 180):
+        super().__init__(timeout=timeout)
+        self.user_id = user_id
+    
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "You are not allowed to interact with this.",
+                ephemeral=True
+            )
+            return False
+        return True
 
 
 class QuitButtonRow(ActionRow):
     """Quit button row."""
     
-    def __init__(self, menu):
+    def __init__(self, view):
         super().__init__()
-        self.menu = menu
+        self.view = view
     
     @button(label="Quit", style=discord.ButtonStyle.danger)
     async def quit_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
-        for item in self.menu.view.walk_children():
+        for item in self.view.walk_children():
             if hasattr(item, "disabled"):
                 item.disabled = True  # type: ignore
-        await interaction.edit_original_response(view=self.menu.view)
+        await interaction.edit_original_response(view=self.view)
 
 
 def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
@@ -204,8 +214,8 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
             for i in range(0, len(all_items), GROUPS_PER_PAGE)
         ]
 
-        # Build the LayoutView with a Container
-        view = LayoutView()
+        # Build the custom RarityView with permission checking
+        view = RarityView(interaction.user.id)
         container = discord.ui.Container()
 
         # Title section — always visible, position 0
@@ -218,24 +228,20 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
         menu = Menu(bot, view, source)
         
         # Create quit button
-        quit_row = QuitButtonRow(menu)
+        quit_row = QuitButtonRow(view)
         
         # Create formatter that keeps buttons at bottom
         formatter = RarityItemFormatter(
             container, 
             position=2,
-            controls=menu.controls,
-            quit_row=quit_row,
+            quit_button=quit_row,
             footer=True
         )
         menu.formatters = (formatter,)
         formatter.configure(menu)
 
         # Initialize menu
-        await menu.init(container=container, position=2)
-        
-        # Add quit button
-        container.add_item(quit_row)
+        await menu.init(container=container, position=None)
 
         await interaction.followup.send(view=view, ephemeral=ephemeral)
 
