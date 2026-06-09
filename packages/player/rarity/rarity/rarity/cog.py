@@ -232,11 +232,15 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
 
         # Initialize menu with container, buttons will be added inside container
         await menu.init(container=container, position=2)
-
+        
         # Add quit button row after pagination controls
         quit_row = QuitButtonRow(view)
         container.add_item(quit_row)
-
+        
+        # Force the formatter to run once before sending
+        first_page = await source.get_page(0)
+        await formatter.format_page(first_page)
+        
         await interaction.followup.send(view=view, ephemeral=ephemeral)
 
     @rarity.autocomplete("search")
