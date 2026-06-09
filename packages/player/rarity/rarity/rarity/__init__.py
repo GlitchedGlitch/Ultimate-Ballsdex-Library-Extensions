@@ -14,16 +14,16 @@ async def setup(bot: "BallsDexBot") -> None:
     log.info("RarityCog loaded")
     
     from settings.models import settings
-    balls_cog = bot.get_cog("Balls") or bot.get_cog(settings.players_group_cog_name)
+    balls_cog = bot.get_cog("Balls")
 
-    if balls_cog is not None and balls_cog.__cog_app_commands_group__:
+    if balls_cog is not None and hasattr(balls_cog, '__cog_app_commands_group__') and balls_cog.__cog_app_commands_group__:
         group = balls_cog.__cog_app_commands_group__
         existing = group.get_command("rarity")
         if existing is not None:
             group.remove_command("rarity")
             log.debug("Removed stale rarity command before re-adding")
         group.add_command(build_rarity_command(bot))
-        log.info("Attached rarity command to /%s group", settings.players_group_cog_name)
+        log.info("Attached rarity command to /%s group", settings.balls_slash_name)
     else:
         log.warning(
             "Balls cog not found — rarity command will not be registered. "
@@ -32,9 +32,8 @@ async def setup(bot: "BallsDexBot") -> None:
 
 
 async def teardown(bot: "BallsDexBot") -> None:
-    from settings.models import settings
-    balls_cog = bot.get_cog("Balls") or bot.get_cog(settings.players_group_cog_name)
-    if balls_cog is not None and balls_cog.__cog_app_commands_group__:
+    balls_cog = bot.get_cog("Balls")
+    if balls_cog is not None and hasattr(balls_cog, '__cog_app_commands_group__') and balls_cog.__cog_app_commands_group__:
         try:
             balls_cog.__cog_app_commands_group__.remove_command("rarity")
         except Exception:
