@@ -3,7 +3,7 @@
 
 .eval await BallInstance.get(id=0xBallIDInCardHere).update(trade_player=await Player.get(id=PlayerIDHere))
 
-# Alternatively remove it
+# Alternative, remove traded by
 
 .eval
 ball = await BallInstance.get(id=0xBallIDInCardHere)
