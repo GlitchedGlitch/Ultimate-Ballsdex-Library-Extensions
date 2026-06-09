@@ -97,17 +97,17 @@ class RarityView(LayoutView):
 class QuitButtonRow(ActionRow):
     """Quit button row."""
     
-    def __init__(self, view):
+    def __init__(self, rarity_view: RarityView):
         super().__init__()
-        self.view = view
+        self.rarity_view = rarity_view
     
     @button(label="Quit", style=discord.ButtonStyle.danger)
     async def quit_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
-        for item in self.view.walk_children():
+        for item in self.rarity_view.walk_children():
             if hasattr(item, "disabled"):
                 item.disabled = True  # type: ignore
-        await interaction.edit_original_response(view=self.view)
+        await interaction.edit_original_response(view=self.rarity_view)
 
 
 def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
@@ -227,7 +227,7 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
         source = ListSource(pages)
         menu = Menu(bot, view, source)
         
-        # Create quit button
+        # Create quit button with reference to view
         quit_row = QuitButtonRow(view)
         
         # Create formatter that keeps buttons at bottom
