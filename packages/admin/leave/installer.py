@@ -209,7 +209,7 @@ class InstallWarningView(View):
                     "Added to `config/extra.toml`.\n\n"
                     "Now rebuild and restart your bot to finish the install:\n"
                     "```\ndocker compose build\ndocker compose up -d\n```\n"
-                    "After the rebuild, `/admin leave_server` will be available.",
+                    "After the rebuild, and also after running `[p].admin syncslash`, `/admin leave_server` will be available.",
                     discord.Color.green(),
                 ),
                 view=None,
