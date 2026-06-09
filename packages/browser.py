@@ -1,10 +1,8 @@
 """
-Package Browser for Ultimate BallsDex Library Extensions :D
-Fetches structure live from GitHub
-
+Package Browser for Ultimate BallsDex Library Extensions :3333
 """
 
-import asyncio, base64, io, os, traceback
+import base64, io, os, re, traceback
 import requests
 import discord
 from discord.ui import View, Button
@@ -13,7 +11,9 @@ REPO   = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
 BRANCH = "v3"
 API    = f"https://api.github.com/repos/{REPO}/contents/{{}}?ref={BRANCH}"
 FOOTER = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
-TIMEOUT = 300  # 5 minutes
+TIMEOUT = 300
+
+EXTRA_TOML = "/code/admin_panel/config/extra.toml"
 
 
 # ── GitHub helpers ────────────────────────────────────────────────────────────
@@ -47,8 +47,16 @@ def get_packages(category: str) -> list[str]:
 
 
 def is_installed(pkg: str) -> bool:
-    path = f"/code/ballsdex/packages/{pkg}"
-    return os.path.isdir(path) and os.path.isfile(os.path.join(path, "cog.py"))
+    """Check if a package is registered in extra.toml."""
+    try:
+        if not os.path.isfile(EXTRA_TOML):
+            return False
+        with open(EXTRA_TOML) as f:
+            contents = f.read()
+        # Match path = "pkg" anywhere in the file
+        return bool(re.search(rf'path\s*=\s*"{re.escape(pkg)}"', contents))
+    except OSError:
+        return False
 
 
 # ── Embeds ────────────────────────────────────────────────────────────────────
@@ -58,7 +66,7 @@ def root_embed(categories: list[str]) -> discord.Embed:
     embed = discord.Embed(
         title="Package Browser",
         description=(
-            "Browse and manage packages for your BallsDex instance.\n\n"
+            "Browse and install packages for your BallsDex instance.\n\n"
             "**Categories**\n" + "\n".join(lines) + "\n\n"
             "Select a category below to view its packages."
         ),
@@ -91,10 +99,6 @@ def timeout_embed(embed: discord.Embed) -> discord.Embed:
 # ── Back button injection ─────────────────────────────────────────────────────
 
 def inject_back_button(view: View, browser: "BrowserView", category: str) -> View:
-    """
-    Add a Back button to any View that navigates back to the category page.
-    Works with any installer view regardless of its custom buttons.
-    """
     back_btn = Button(
         label="Back to list",
         style=discord.ButtonStyle.secondary,
@@ -104,6 +108,7 @@ def inject_back_button(view: View, browser: "BrowserView", category: str) -> Vie
 
     async def back_callback(interaction: discord.Interaction):
         await interaction.response.defer()
+        browser.locked = False
         await browser.show_category(category)
 
     back_btn.callback = back_callback
@@ -118,11 +123,8 @@ async def run_package_installer(
     category: str,
     pkg: str,
 ):
-    """
-    Fetch and execute the package's own installer.py.
-    The installer sends its own embed+view message.
-    We then inject a Back button into whatever view it created.
-    """
+    browser.locked = True
+
     try:
         code = gh_file(f"packages/{category}/{pkg}/installer.py")
     except Exception:
@@ -134,13 +136,11 @@ async def run_package_installer(
             color=discord.Color.red(),
         )
         embed.set_footer(text=FOOTER)
-        await browser.message.edit(embed=embed, view=None)
+        err_view = View(timeout=None)
+        inject_back_button(err_view, browser, category)
+        await browser.message.edit(embed=embed, view=err_view)
         await browser.ctx.send(file=f)
         return
-
-    # We intercept ctx.send so the installer message goes to the existing
-    # browser message instead of creating a new one, then we inject Back.
-    intercepted_view: list[View] = []
 
     class InterceptCtx:
         """Wraps ctx so installer's `await ctx.send(...)` edits the browser message."""
@@ -149,30 +149,14 @@ async def run_package_installer(
         async def send(self, *args, **kwargs):
             view = kwargs.get("view")
             embed = kwargs.get("embed")
-
             if view is not None:
-                # Inject Back button before displaying
                 inject_back_button(view, browser, category)
-                # Wire view.message to browser.message so installer internals work
-                intercepted_view.append(view)
-
-            await browser.message.edit(
-                embed=embed,
-                view=view,
-            )
-
-            # Return a proxy so installer can do `view.message = message`
+                view.timeout = None
+            await browser.message.edit(embed=embed, view=view)
             return browser.message
 
     fake_ctx = InterceptCtx()
-
-    # Build the installer's globals: bot, ctx point to our intercept
-    globs = {
-        "bot": browser.bot,
-        "ctx": fake_ctx,
-    }
-
-    # Wrap the installer in an async function so top-level awaits work
+    globs = {"bot": browser.bot, "ctx": fake_ctx}
     lines = ["async def __installer(bot, ctx):"]
     for line in code.splitlines():
         lines.append("    " + line)
@@ -190,8 +174,7 @@ async def run_package_installer(
             color=discord.Color.red(),
         )
         embed.set_footer(text=FOOTER)
-        # Add a back button even on error
-        err_view = View(timeout=TIMEOUT)
+        err_view = View(timeout=None)
         inject_back_button(err_view, browser, category)
         await browser.message.edit(embed=embed, view=err_view)
         await browser.ctx.send(file=f)
@@ -235,6 +218,8 @@ class CategoryView(View):
         return True
 
     async def on_timeout(self):
+        if self.browser.locked:
+            return
         for c in self.children:
             c.disabled = True
         try:
@@ -256,6 +241,7 @@ class BrowserView(View):
         self.owner_id   = ctx.author.id
         self.categories = categories
         self.message    = None
+        self.locked     = False
         self._build()
 
     def _build(self):
@@ -292,6 +278,8 @@ class BrowserView(View):
         return True
 
     async def on_timeout(self):
+        if self.locked:
+            return
         for c in self.children:
             c.disabled = True
         try:
@@ -303,10 +291,12 @@ class BrowserView(View):
             pass
 
     async def show_root(self):
+        self.locked = False
         self._build()
         await self.message.edit(embed=root_embed(self.categories), view=self)
 
     async def show_category(self, category: str):
+        self.locked = False
         try:
             packages = get_packages(category)
         except Exception as e:
@@ -330,16 +320,15 @@ class BrowserView(View):
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def _is_v2() -> bool:
-    """Detect v2 by checking for Tortoise ORM and absence of a ready Django setup."""
     try:
         from django.apps import apps
         apps.check_apps_ready()
-        return False  # Django is up — this is v3
+        return False
     except Exception:
         pass
     try:
         import tortoise  # noqa: F401
-        return True  # Tortoise present, Django not ready — this is v2
+        return True
     except ImportError:
         pass
     return False
@@ -349,7 +338,7 @@ if _is_v2():
         embed=discord.Embed(
             title="Incompatible Version",
             description=(
-                "This browser is for **BallsDex v3** only.\n\n"
+                "This browser menu is for **BallsDex v3** only.\n\n"
                 "Your instance appears to be running **v2**.\n\n"
                 "Please use the **v2 branch** of the browser instead, or update "
                 "to v3 before scrolling."
@@ -358,8 +347,7 @@ if _is_v2():
         ).set_footer(text=FOOTER)
     )
 else:
-    installed = is_installed()
-    view      = BrowserView(bot, ctx, installed)
-    color     = discord.Color.gold() if installed else discord.Color.greyple()
-    message   = await ctx.send(embed=build_main_embed(installed, color), view=view)
+    categories = get_categories()
+    view = BrowserView(bot, ctx, categories)
+    message = await ctx.send(embed=root_embed(categories), view=view)
     view.message = message
