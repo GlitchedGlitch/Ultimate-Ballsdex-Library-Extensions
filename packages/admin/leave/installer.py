@@ -15,7 +15,7 @@ TOML_ENTRY  = (
     "[[ballsdex.packages]]\n"
     f'location = "{GIT_URL}"\n'
     f'path = "{APP_PATH}"\n'
-    "enabled = true\n"
+    "enabled = true"
 )
 
 EXTRA_TOML = "/code/admin_panel/config/extra.toml"
