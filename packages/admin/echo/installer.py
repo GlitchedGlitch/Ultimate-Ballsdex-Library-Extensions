@@ -297,7 +297,7 @@ class InstallWarningView(View):
                     f"Added to `config/extra.toml` with command name `/admin {self.parent.cmd_name}`.\n\n"
                     "Now rebuild and restart your bot to finish the install:\n"
                     "```\ndocker compose build\ndocker compose up -d\n```\n"
-                    "After the rebuild, `echo` will appear in the packages loaded log.\n\n"
+                    "After the rebuild, and also after running `[p].admin syncslash`, `echo` will appear in the packages loaded log.\n\n"
                     "Use the **Rename** button before installing to change the command name.",
                     discord.Color.green(),
                 ),
