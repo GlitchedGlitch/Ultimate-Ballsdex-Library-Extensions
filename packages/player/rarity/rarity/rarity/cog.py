@@ -187,34 +187,28 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
             )
             return
 
-        # Chunk into pages of GROUPS_PER_PAGE
         pages: list[list[discord.ui.Item]] = [
             all_items[i : i + GROUPS_PER_PAGE]
             for i in range(0, len(all_items), GROUPS_PER_PAGE)
         ]
 
-        # Build the LayoutView with a Container
         view = LayoutView()
         container = discord.ui.Container()
 
-        # Title section — always visible, position 0
         container.add_item(discord.ui.TextDisplay(f"# {plural} Rarity List"))
         container.add_item(discord.ui.Separator())
 
         view.add_item(container)
 
         source = ListSource(pages)
-        # Items are inserted at position 2 (after title + separator)
         formatter = RarityItemFormatter(container, position=2)
         menu = Menu(bot, view, source, formatter)
-        
-        # Initialize menu, buttons will be added to the view (outside container)
-        await menu.init(container=container, position=3)
-        
-        # Add quit button at the bottom of the container (after controls)
-        quit_button_row = QuitButtonRow(menu)
-        container.add_item(quit_button_row)
 
+        await menu.init()
+
+        quit_button_row = QuitButtonRow(menu)
+        view.add_item(quit_button_row)
+        
         await interaction.followup.send(view=view, ephemeral=ephemeral)
 
     @rarity.autocomplete("search")
