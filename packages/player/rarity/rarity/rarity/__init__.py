@@ -13,36 +13,33 @@ log = logging.getLogger("ballsdex.packages.rarity")
 
 async def setup(bot: "BallsDexBot") -> None:
     await bot.add_cog(RarityCog(bot))
-
     log.info("RarityCog loaded")
 
-    balls_cog = bot.cogs.get("Balls")
+    balls_cog = bot.get_cog("Balls")
 
-    if balls_cog is not None and hasattr(balls_cog, "balls"):
-        try:
-            try:
-                balls_cog.balls.app_command.remove_command("rarity")
-            except Exception:
-                pass
+    if balls_cog is None or not hasattr(balls_cog, "admin"):
+        log.warning("Balls cog not found — rarity command not registered")
+        return
 
-            balls_cog.balls.app_command.add_command(
-                build_rarity_command(bot)
-            )
+    group = balls_cog.admin.app_command
 
-            log.info("Attached /balls rarity")
+    try:
+        group.remove_command("rarity")
+    except Exception:
+        pass
 
-        except Exception:
-            log.exception("Failed to attach /balls rarity")
+    group.add_command(build_rarity_command(bot))
 
-    else:
-        log.warning("Balls cog not found — /balls rarity not registered")
+    log.info("Attached /balls rarity")
 
 
 async def teardown(bot: "BallsDexBot") -> None:
-    balls_cog = bot.cogs.get("Balls")
+    balls_cog = bot.get_cog("Balls")
 
-    if balls_cog is not None and hasattr(balls_cog, "balls"):
-        try:
-            balls_cog.balls.app_command.remove_command("rarity")
-        except Exception:
-            pass
+    if balls_cog is None or not hasattr(balls_cog, "admin"):
+        return
+
+    try:
+        balls_cog.admin.app_command.remove_command("rarity")
+    except Exception:
+        pass
