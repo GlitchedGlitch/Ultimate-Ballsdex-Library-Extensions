@@ -43,6 +43,26 @@ class RarityCog(commands.Cog):
         self.bot = bot
 
 
+class RarityItemFormatter(ItemFormatter):
+    """Custom ItemFormatter that properly clears items between pages."""
+    
+    async def format_page(self, page):
+        # Remove ALL items after position (not just items > position)
+        items_to_remove = list(self.item.children[self.position :])
+        for item in items_to_remove:
+            self.item.remove_item(item)
+        
+        # Add new items
+        for section in page:
+            self.item.add_item(section)
+        
+        # Add footer
+        if self.footer and self.menu.source.get_max_pages() > 1:
+            self.item.add_item(
+                discord.ui.TextDisplay(f"-# Page {self.menu.current_page + 1}/{self.menu.source.get_max_pages()}")
+            )
+
+
 def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
     """
     Build the rarity command as a standalone Command to attach to the Balls group.
@@ -159,7 +179,8 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
 
         source = ListSource(pages)
         # Items are inserted at position 2 (after title + separator)
-        formatter = ItemFormatter(container, position=2)
+        # Use the custom formatter that properly clears items
+        formatter = RarityItemFormatter(container, position=2)
         menu = Menu(bot, view, source, formatter)
         await menu.init(container=container)
 
