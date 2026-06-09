@@ -45,32 +45,38 @@ class RarityCog(commands.Cog):
 
 
 class RarityItemFormatter(ItemFormatter):
-    """Custom ItemFormatter that keeps buttons at the bottom permanently."""
-    
     async def format_page(self, page):
-        children_list = list(self.item.children)
-        
-        # Keep only the header and separator (first 2 items)
-        items_to_keep = children_list[:self.position]
-        
-        # Remove everything after position except ActionRows (buttons)
-        items_to_remove = []
-        for child in children_list[self.position:]:
-            if not isinstance(child, ActionRow):
-                items_to_remove.append(child)
-        
-        for item in items_to_remove:
-            self.item.remove_item(item)
-        
-        # Add new page items
+        children = list(self.item.children)
+
+        # Keep header items
+        fixed_top = children[: self.position]
+
+        # Keep button rows
+        button_rows = [
+            child
+            for child in children
+            if isinstance(child, ActionRow)
+        ]
+
+        # Remove everything
+        for child in children[self.position:]:
+            self.item.remove_item(child)
+
+        # Re-add page content first
         for section in page:
             self.item.add_item(section)
-        
-        # Add footer if needed
+
+        # Footer before buttons
         if self.footer and self.menu.source.get_max_pages() > 1:
             self.item.add_item(
-                discord.ui.TextDisplay(f"-# Page {self.menu.current_page + 1}/{self.menu.source.get_max_pages()}")
+                discord.ui.TextDisplay(
+                    f"-# Page {self.menu.current_page + 1}/{self.menu.source.get_max_pages()}"
+                )
             )
+
+        # Buttons ALWAYS LAST
+        for row in button_rows:
+            self.item.add_item(row)
 
 
 class RarityView(LayoutView):
