@@ -2,55 +2,29 @@
 # REMEMBER THAT IF THE NEW ID ALREADY EXISTS IT WILL BE DELETED AND OVERWRITTEN
 
 .eval
-from tortoise.exceptions import DoesNotExist
-from tortoise import Tortoise, connections
+from django.apps import apps
 
 old_id=0xBallIDInCardHere
-new_id=0xBallIDInCardHere
+new_id=0xNewId
 
-conn=connections.get("default")
+if await BallInstance.objects.filter(id=new_id).aexists(): await BallInstance.objects.filter(id=new_id).adelete()
 
-models=Tortoise.apps.get("models",{}).values()
+q=BallInstance.objects.filter(id=old_id)
+if not await q.aexists(): return f"Unable to change id, asset with id {hex(old_id)} does not exist"
 
-try:
-    ball=await BallInstance.get(id=old_id)
-except DoesNotExist:
-    return f"Ball {hex(old_id)} does not exist"
+ball=await q.aget()
 
-for model in models:
-    for field in model._meta.fields_map.values():
-        if getattr(field,"related_model",None)==BallInstance:
-            fk=getattr(field,"source_field",None)
-            if isinstance(fk,str):
-                try:
-                    await model.filter(**{fk:new_id}).delete()
-                except:
-                    pass
+data={f.attname:getattr(ball,f.attname) for f in ball._meta.concrete_fields if f.name!="id"}
 
-try:
-    await BallInstance.filter(id=new_id).delete()
-except:
-    pass
+await BallInstance(id=new_id,**data).asave(force_insert=True)
 
-data={}
-for field in ball._meta.db_fields:
-    if field!="id":
-        data[field]=getattr(ball,field)
+for model in apps.get_models():
+ for field in model._meta.fields:
+  rel=getattr(field,"related_model",None)
+  if rel is BallInstance:
+   try: await model.objects.filter(**{field.attname:old_id}).aupdate(**{field.attname:new_id})
+   except: pass
 
-await BallInstance.create(id=new_id,**data)
+await ball.adelete()
 
-for model in models:
-    for field in model._meta.fields_map.values():
-        if getattr(field,"related_model",None)==BallInstance:
-            fk=getattr(field,"source_field",None)
-            if isinstance(fk,str):
-                try:
-                    await model.filter(**{fk:old_id}).update(**{fk:new_id})
-                except:
-                    pass
-
-await BallInstance.filter(id=old_id).delete()
-
-await conn.execute_query("REINDEX TABLE ballinstance")
-
-return f"Changed {hex(old_id)} into {hex(new_id)}"
+return f"Changed {hex(old_id)} -> {hex(new_id)}"
