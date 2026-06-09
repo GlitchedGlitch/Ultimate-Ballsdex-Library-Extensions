@@ -1,4 +1,4 @@
-# Put the discord id of the player in line 2
+# Put the discord id of the player in line 4
 
 .eval
 player = await Player.filter(discord_id=DiscordIdHere).first()
