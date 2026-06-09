@@ -7,16 +7,15 @@ from discord.ui import View, Button
 
 REPO       = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
 BRANCH     = "v3"
-# pip subdirectory syntax — points pip at the subfolder containing pyproject.toml
 GIT_URL    = f"git+https://github.com/{REPO}.git@{BRANCH}#subdirectory=packages/player/collector"
 APP_PATH   = "collector"
 TOML_MARKER = f'path = "{APP_PATH}"'
 TOML_ENTRY = (
-    "\n\n# Collector Package\n"
+    "\n# Collector Package\n"
     "[[ballsdex.packages]]\n"
     f'location = "{GIT_URL}"\n'
     f'path = "{APP_PATH}"\n'
-    "enabled = true\n"
+    "enabled = true"
 )
 
 # Correct path: docker-compose mounts ./config to /code/admin_panel/config
