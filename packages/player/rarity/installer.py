@@ -11,7 +11,7 @@ GIT_URL     = f"git+https://github.com/{REPO}.git@{BRANCH}#subdirectory=packages
 APP_PATH    = "rarity"
 TOML_MARKER = f'path = "{APP_PATH}"'
 TOML_ENTRY  = (
-    "\n# Rarity Package\n"
+    "\n\n# Rarity Package\n"
     "[[ballsdex.packages]]\n"
     f'location = "{GIT_URL}"\n'
     f'path = "{APP_PATH}"\n'
