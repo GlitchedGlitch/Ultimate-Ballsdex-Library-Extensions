@@ -48,14 +48,11 @@ class RarityItemFormatter(ItemFormatter):
     """Custom ItemFormatter that properly clears items between pages while keeping controls."""
     
     async def format_page(self, page):
-        # Find the index where controls start (they're at the end after position)
-        # We want to remove only the content items, not the control buttons
         children_list = list(self.item.children)
         
-        # Remove items after position, but keep ActionRows (which contain the controls)
+        # Find where ActionRows start (they contain buttons and should be preserved)
         items_to_remove = []
-        for i, child in enumerate(children_list[self.position:], start=self.position):
-            # Keep ActionRows (they contain the control buttons)
+        for child in children_list[self.position:]:
             if not isinstance(child, ActionRow):
                 items_to_remove.append(child)
         
@@ -71,6 +68,22 @@ class RarityItemFormatter(ItemFormatter):
             self.item.add_item(
                 discord.ui.TextDisplay(f"-# Page {self.menu.current_page + 1}/{self.menu.source.get_max_pages()}")
             )
+
+
+class QuitButtonRow(ActionRow):
+    """Quit button row."""
+    
+    def __init__(self, menu):
+        super().__init__()
+        self.menu = menu
+    
+    @button(label="Quit", style=discord.ButtonStyle.danger)
+    async def quit_button(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        for item in self.menu.view.walk_children():
+            if hasattr(item, "disabled"):
+                item.disabled = True  # type: ignore
+        await interaction.edit_original_response(view=self.menu.view)
 
 
 def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
@@ -192,17 +205,12 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
         formatter = RarityItemFormatter(container, position=2)
         menu = Menu(bot, view, source, formatter)
 
-        # Initialize menu with container, buttons will be added at the end
-        await menu.init(container=container, position=None)
+        # Initialize menu with container, buttons will be added to container
+        await menu.init(container=container, position=2)
 
-        # Add quit button to the controls row
-        @menu.controls.button(label="Quit", style=discord.ButtonStyle.danger)
-        async def quit_button(interaction: discord.Interaction, button: Button):
-            await interaction.response.defer()
-            for item in menu.view.walk_children():
-                if hasattr(item, "disabled"):
-                    item.disabled = True  # type: ignore
-            await interaction.edit_original_response(view=menu.view)
+        # Add quit button row after pagination controls
+        quit_row = QuitButtonRow(menu)
+        container.add_item(quit_row)
 
         await interaction.followup.send(view=view, ephemeral=ephemeral)
 
