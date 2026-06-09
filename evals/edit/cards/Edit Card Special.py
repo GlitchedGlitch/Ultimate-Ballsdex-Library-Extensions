@@ -1,4 +1,4 @@
-# Edit Card Special by name
+# Edit card special by name
 .eval
 ball = await BallInstance.get(id=0xBallIDInCardHere)
 
@@ -16,7 +16,7 @@ ball.special = special
 
 await ball.save()
 
-# Remove Special from card
+# Remove Special
 .eval
 ball = await BallInstance.get(id=0xBallIDInCardHere)
 
