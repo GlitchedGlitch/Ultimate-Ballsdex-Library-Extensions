@@ -1,7 +1,11 @@
-from ballsdex.core.models import Ball
+from bd_models.models import Ball
 
 
 class CollectorBall(Ball):
+    """
+    Proxy model for Ball used only to power the Collector admin section
+    """
+
     class Meta:
         proxy = True
         verbose_name = "Collector Requirement"
