@@ -1,13 +1,25 @@
-import base64, io, json, os, requests, traceback, discord
+import base64, io, json, os, subprocess, requests, traceback, discord
 from discord.ui import View, Button
 
-REPO = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
-BASE = "https://api.github.com/repos/GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions/contents/packages/player/collector/{}?ref=v2-main".format("{}")
-PKG = "/code/ballsdex/packages/collector"
+REPO   = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
+BRANCH = "v2-main"
+BASE   = f"https://api.github.com/repos/{REPO}/contents/packages/player/collector/{{}}?ref={BRANCH}"
+PKG    = "/code/ballsdex/packages/collector"
 CONFIG = "/code/config.yml"
 REQUIREMENTS_FILE = os.path.join(PKG, "requirements.txt")
 PACKAGE_ENTRY = "  - ballsdex.packages.collector"
-FILES = ("__init__.py", "models.py", "cog.py", "admin.py", "apps.py")
+
+# Admin panel files hosted in the same repo
+ADMIN_PANEL_DST = "/code/admin_panel/collector_admin"
+ADMIN_FILES = [
+    ("admin_panel/__init__.py",        f"{ADMIN_PANEL_DST}/__init__.py"),
+    ("admin_panel/apps.py",            f"{ADMIN_PANEL_DST}/apps.py"),
+    ("admin_panel/models.py",          f"{ADMIN_PANEL_DST}/models.py"),
+    ("admin_panel/admin/__init__.py",  f"{ADMIN_PANEL_DST}/admin/__init__.py"),
+    ("admin_panel/admin/collector.py", f"{ADMIN_PANEL_DST}/admin/collector.py"),
+]
+
+BOT_FILES = ("__init__.py", "cog.py")
 FOOTER = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
 FOOTER_TIMEOUT = FOOTER + " • Timed out"
 
@@ -18,36 +30,47 @@ BAR_LEN    = 10
 
 def _bar(current: int, total: int) -> str:
     filled = round(BAR_LEN * current / total)
-    pct = round(100 * current / total)
+    pct    = round(100 * current / total)
     return f"`{BAR_FILLED * filled}{BAR_EMPTY * (BAR_LEN - filled)}` {pct}%"
 
 
 def _progress_embed(title: str, steps: list, color: discord.Color) -> discord.Embed:
-    done_count = sum(1 for _, s in steps if s is True)
-    total = len(steps)
+    done = sum(1 for _, s in steps if s is True)
     lines = []
     for label, state in steps:
         icon = {None: "⬜", True: "✅", False: "❌"}[state]
         lines.append(f"{icon} {label}")
     embed = discord.Embed(
         title=title,
-        description="\n".join(lines) + f"\n\n{_bar(done_count, total)}",
+        description="\n".join(lines) + f"\n\n{_bar(done, len(steps))}",
         color=color,
     )
     embed.set_footer(text=FOOTER)
     return embed
 
 
+# ── File helpers ──────────────────────────────────────────────────────────────
+
 def is_installed():
     return os.path.isdir(PKG) and os.path.isfile(os.path.join(PKG, "cog.py"))
 
 
-def download_files():
-    for f in FILES:
+def download_bot_files():
+    for f in BOT_FILES:
         resp = requests.get(BASE.format(f))
         resp.raise_for_status()
         content = base64.b64decode(resp.json()["content"]).decode()
         with open(os.path.join(PKG, f), "w") as fh:
+            fh.write(content)
+
+
+def download_admin_files():
+    os.makedirs(f"{ADMIN_PANEL_DST}/admin", exist_ok=True)
+    for repo_path, dst_path in ADMIN_FILES:
+        resp = requests.get(BASE.format(repo_path))
+        resp.raise_for_status()
+        content = base64.b64decode(resp.json()["content"]).decode()
+        with open(dst_path, "w") as fh:
             fh.write(content)
 
 
@@ -58,6 +81,7 @@ def ensure_requirements_file():
 
 
 def add_to_config():
+    """Add bot package after trade line."""
     with open(CONFIG, "r") as f:
         lines = f.readlines()
     if any(PACKAGE_ENTRY.strip() in l for l in lines):
@@ -70,6 +94,38 @@ def add_to_config():
         f.writelines(lines)
 
 
+def add_django_app_to_config():
+    """Add collector_admin to extra-django-apps in config.yml."""
+    try:
+        import yaml
+        with open(CONFIG, "r") as f:
+            cfg = yaml.safe_load(f)
+        apps = cfg.get("extra-django-apps") or []
+        if "collector_admin" not in apps:
+            apps.append("collector_admin")
+            cfg["extra-django-apps"] = apps
+            with open(CONFIG, "w") as f:
+                yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+    except Exception:
+        pass  # non-fatal — admin panel works without it until manually added
+
+
+def run_migrations():
+    """Run makemigrations + migrate for collector_admin."""
+    for cmd in [
+        ["python", "manage.py", "makemigrations", "collector_admin"],
+        ["python", "manage.py", "migrate", "collector_admin"],
+    ]:
+        result = subprocess.run(
+            cmd, cwd="/code/admin_panel",
+            capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Migration failed:\n{result.stdout}\n{result.stderr}"
+            )
+
+
 def remove_from_config():
     with open(CONFIG, "r") as f:
         lines = f.readlines()
@@ -78,11 +134,30 @@ def remove_from_config():
         f.writelines(lines)
 
 
+def remove_django_app_from_config():
+    try:
+        import yaml
+        with open(CONFIG, "r") as f:
+            cfg = yaml.safe_load(f)
+        apps = cfg.get("extra-django-apps") or []
+        if "collector_admin" in apps:
+            apps.remove("collector_admin")
+            cfg["extra-django-apps"] = apps
+            with open(CONFIG, "w") as f:
+                yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+    except Exception:
+        pass
+
+
 def delete_files():
     import shutil
     if os.path.isdir(PKG):
         shutil.rmtree(PKG)
+    if os.path.isdir(ADMIN_PANEL_DST):
+        shutil.rmtree(ADMIN_PANEL_DST)
 
+
+# ── Embeds ────────────────────────────────────────────────────────────────────
 
 def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
     embed = discord.Embed(
@@ -92,14 +167,10 @@ def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
             "**Commands**\n"
             "• `/collector claim` — claim a collector ball\n"
             "• `/collector list` — view all active requirements\n"
-            "• `/admin collector set` — set a requirement and reward\n"
-            "• `/admin collector delete` — remove a requirement\n"
+            "• `/admin collector set` — set a requirement\n"
             "• `/admin collector bulk` — bulk add requirements\n"
+            "• `/admin collector delete` — remove a requirement\n"
             "• `/admin collector view` — inspect a requirement\n\n"
-            "**How it works**\n"
-            "Admins configure a minimum ball count and a special reward. "
-            "Players who own enough copies of that ball can claim a collector "
-            "version with the chosen special applied.\n\n"
             f"**Status:** {'✅ Installed' if installed else '❌ Not installed'}"
         ),
         color=color,
@@ -112,13 +183,10 @@ def build_confirm_embed() -> discord.Embed:
     embed = discord.Embed(
         title="Delete Collector Package",
         description=(
-            "⚠️ **Are you sure you want to delete the Collector package?**\n\n"
-            "This will:\n"
-            "• Unload the package from the bot\n"
-            "• Delete all package files\n"
-            "• Remove it from `config.yml`\n"
-            "• Wipe all active collector requirements\n\n"
-            "This action **cannot be undone** without reinstalling."
+            "⚠️ **Are you sure?**\n\n"
+            "This will remove the bot package, admin panel app, "
+            "and config entries.\n\n"
+            "**requirements.txt and claims.txt are kept** so data isn't lost."
         ),
         color=discord.Color.orange(),
     )
@@ -147,6 +215,8 @@ def build_result_embed(title: str, description: str, color: discord.Color) -> di
     return embed
 
 
+# ── Confirm delete ────────────────────────────────────────────────────────────
+
 class ConfirmDeleteView(View):
     def __init__(self, parent: "CollectorInstallerView"):
         super().__init__(timeout=60)
@@ -170,7 +240,7 @@ class ConfirmDeleteView(View):
         await interaction.response.defer()
 
         DELETE_STEPS = [
-            "Unloading extension",
+            "Unloading bot extension",
             "Deleting package files",
             "Removing from config.yml",
         ]
@@ -203,6 +273,7 @@ class ConfirmDeleteView(View):
             await update(1)
 
             remove_from_config()
+            remove_django_app_from_config()
             await update(2)
 
             self.parent.installed = False
@@ -213,11 +284,10 @@ class ConfirmDeleteView(View):
                     "Successfully Deleted",
                     (
                         "The **Collector Package** has been removed.\n\n"
-                        "• All package files deleted\n"
-                        "• Removed from `config.yml`\n"
-                        "• All requirements wiped\n\n"
-                        "Restart the bot to fully apply the config change.\n\n"
-                        "Run this installer again to reinstall."
+                        "• Bot package unloaded and files deleted\n"
+                        "• Admin panel app removed\n"
+                        "• Config entries cleaned up\n"
+                        "Restart the bot and admin panel to fully apply."
                     ),
                     discord.Color.red(),
                 ),
@@ -243,6 +313,8 @@ class ConfirmDeleteView(View):
             embed=build_main_embed(self.parent.installed, color), view=self.parent
         )
 
+
+# ── Main installer view ───────────────────────────────────────────────────────
 
 class CollectorInstallerView(View):
     def __init__(self, bot, ctx, installed: bool):
@@ -281,15 +353,18 @@ class CollectorInstallerView(View):
     async def install_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
 
-        INSTALL_STEPS = [
+        STEPS = [
             "Creating package folder",
-            "Downloading files",
+            "Downloading bot files",
             "Creating requirements file",
             "Adding to config.yml",
-            "Loading extension",
+            "Downloading admin panel files",
+            "Registering admin panel app",
+            "Running migrations",
+            "Loading bot extension",
             "Syncing command tree",
         ]
-        steps = [(s, None) for s in INSTALL_STEPS]
+        steps = [(s, None) for s in STEPS]
 
         async def update(i: int, success: bool = True):
             steps[i] = (steps[i][0], success)
@@ -307,7 +382,7 @@ class CollectorInstallerView(View):
             os.makedirs(PKG, exist_ok=True)
             await update(0)
 
-            download_files()
+            download_bot_files()
             await update(1)
 
             ensure_requirements_file()
@@ -316,14 +391,25 @@ class CollectorInstallerView(View):
             add_to_config()
             await update(3)
 
-            await self.bot.load_extension("ballsdex.packages.collector")
+            download_admin_files()
             await update(4)
 
-            from ballsdex.settings import settings
-            await self.bot.tree.sync()
-            for guild_id in settings.admin_guild_ids:
-                await self.bot.tree.sync(guild=discord.Object(id=guild_id))
+            add_django_app_to_config()
             await update(5)
+
+            run_migrations()
+            await update(6)
+
+            await self.bot.load_extension("ballsdex.packages.collector")
+            await update(7)
+
+            from ballsdex.settings import settings
+            import asyncio
+            await asyncio.gather(
+                self.bot.tree.sync(),
+                *[self.bot.tree.sync(guild=discord.Object(id=gid)) for gid in settings.admin_guild_ids]
+            )
+            await update(8)
 
             self.done = True
             self.stop()
@@ -331,10 +417,11 @@ class CollectorInstallerView(View):
                 embed=build_result_embed(
                     "Successfully Installed",
                     (
-                        "The **Collector Package** has been installed and loaded.\n\n"
-                        "You can now use `/collector claim`, `/collector list` "
-                        "and the `/admin collector` commands.\n\n"
-                        "Run this installer again to update or remove the package."
+                        "The **Collector Package** has been installed.\n\n"
+                        "• Bot commands: `/collector claim`, `/collector list`, `/admin collector`\n"
+                        "• Admin panel: **Collector Requirements** section at `localhost:8000`\n\n"
+                        "Restart the admin panel container to activate the admin panel section.\n\n"
+                        "Run this installer again to update or remove."
                     ),
                     discord.Color.green(),
                 ),
@@ -356,12 +443,14 @@ class CollectorInstallerView(View):
     async def update_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
 
-        UPDATE_STEPS = [
-            "Downloading latest files",
-            "Reloading extension",
+        STEPS = [
+            "Downloading latest bot files",
+            "Downloading latest admin panel files",
+            "Running migrations",
+            "Reloading bot extension",
             "Syncing command tree",
         ]
-        steps = [(s, None) for s in UPDATE_STEPS]
+        steps = [(s, None) for s in STEPS]
 
         async def update(i: int, success: bool = True):
             steps[i] = (steps[i][0], success)
@@ -376,21 +465,30 @@ class CollectorInstallerView(View):
         )
 
         try:
-            download_files()
+            download_bot_files()
             await update(0)
+
+            download_admin_files()
+            add_django_app_to_config()
+            await update(1)
+
+            run_migrations()
+            await update(2)
 
             loaded = "ballsdex.packages.collector" in self.bot.extensions
             if loaded:
                 await self.bot.reload_extension("ballsdex.packages.collector")
             else:
                 await self.bot.load_extension("ballsdex.packages.collector")
-            await update(1)
+            await update(3)
 
             from ballsdex.settings import settings
-            await self.bot.tree.sync()
-            for guild_id in settings.admin_guild_ids:
-                await self.bot.tree.sync(guild=discord.Object(id=guild_id))
-            await update(2)
+            import asyncio
+            await asyncio.gather(
+                self.bot.tree.sync(),
+                *[self.bot.tree.sync(guild=discord.Object(id=gid)) for gid in settings.admin_guild_ids]
+            )
+            await update(4)
 
             self.done = True
             self.stop()
@@ -398,9 +496,9 @@ class CollectorInstallerView(View):
                 embed=build_result_embed(
                     "Successfully Updated",
                     (
-                        "The **Collector Package** has been updated and reloaded.\n\n"
-                        "All commands are now running the latest version.\n\n"
-                        "Run this installer again to update or remove the package."
+                        "The **Collector Package** has been updated.\n\n"
+                        "Restart the admin panel container to apply admin panel changes.\n\n"
+                        "Run this installer again to update or remove."
                     ),
                     discord.Color.blue(),
                 ),
@@ -423,37 +521,11 @@ class CollectorInstallerView(View):
         await interaction.response.defer()
         await self.message.edit(embed=build_confirm_embed(), view=ConfirmDeleteView(self))
 
-def _is_v3() -> bool:
-    """Detect v3 by checking for Django setup and absence of a ready Tortoise ORM."""
-    try:
-        from django.apps import apps
-        apps.check_apps_ready()
-        return True  # Django is up — this is v3
-    except Exception:
-        pass
-    try:
-        import tortoise  # noqa: F401
-        return False  # Tortoise present, Django not ready — this is v2
-    except ImportError:
-        pass
-    return True
 
-if _is_v3():
-    await ctx.send(
-        embed=discord.Embed(
-            title="Incompatible Version",
-            description=(
-                "This installer is for **BallsDex v2** only.\n\n"
-                "Your instance appears to be running **v3**.\n\n"
-                "Please use the **v3 branch** of this package instead, or downgrade "
-                "to v2 before installing."
-            ),
-            color=discord.Color.red(),
-        ).set_footer(text=FOOTER)
-    )
-else:
-    installed = is_installed()
-    view      = CollectorInstallerView(bot, ctx, installed)
-    color     = discord.Color.gold() if installed else discord.Color.greyple()
-    message   = await ctx.send(embed=build_main_embed(installed, color), view=view)
-    view.message = message
+# ── Entry point ───────────────────────────────────────────────────────────────
+
+installed = is_installed()
+view = CollectorInstallerView(bot, ctx, installed)
+initial_color = discord.Color.gold() if installed else discord.Color.greyple()
+message = await ctx.send(embed=build_main_embed(installed, initial_color), view=view)
+view.message = message
