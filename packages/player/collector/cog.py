@@ -38,14 +38,6 @@ MIGRATION_HASH_FILE = "/code/ballsdex/packages/collector/.requirements_hash"
 async def _migrate_requirements():
     """
     Migrate requirements.txt JSON into the database.
-    Expected format:
-    {
-      "ball_id": [
-        {"ball_id": 1, "ball_name": "...", "amount": 3, "special_id": 1, "special_name": "..."},
-        ...
-      ],
-      ...
-    }
     Skips if requirements.txt is missing/empty or if already migrated same content.
     """
     import hashlib
@@ -78,7 +70,12 @@ async def _migrate_requirements():
 
         log.info("Read requirements.txt: %s bytes, hash=%s", len(raw), content_hash)
 
-        # ── ERASE existing requirements ───────────────────────────────────────
+        existing_claims = await CollectorClaim.all().count()
+        if existing_claims > 0:
+            log.info("Erasing %s existing CollectorClaim entries...", existing_claims)
+            await CollectorClaim.all().delete()
+            log.info("Existing claims erased.")
+
         existing_count = await CollectorRequirement.all().count()
         if existing_count > 0:
             log.info("Erasing %s existing CollectorRequirement entries...", existing_count)
@@ -88,7 +85,6 @@ async def _migrate_requirements():
         migrated = 0
         errors = 0
 
-        # Expected format: {"ball_id": [{"ball_id": 1, "ball_name": "...", "amount": 3, "special_id": 1, "special_name": "..."}, ...]}
         if isinstance(data, dict):
             for ball_id_str, entries in data.items():
                 if not isinstance(entries, list):
