@@ -4,7 +4,9 @@ Collector package for BallsDex :)))
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
@@ -27,6 +29,136 @@ if TYPE_CHECKING:
 log = logging.getLogger("ballsdex.packages.collector")
 
 GROUPS_PER_PAGE = 7
+
+# ── Requirements.txt migration ──────────────────────────────────────────────
+
+REQUIREMENTS_FILE = "/code/ballsdex/packages/collector/requirements.txt"
+MIGRATION_MARKER = "/code/ballsdex/packages/collector/.requirements_migrated"
+
+async def _migrate_requirements():
+    """
+    One-time migration: read requirements.txt JSON and insert into database.
+    Skips if migration already done or if requirements.txt is empty/missing.
+    """
+    if os.path.isfile(MIGRATION_MARKER):
+        return
+    if not os.path.isfile(REQUIREMENTS_FILE):
+        return
+
+    try:
+        with open(REQUIREMENTS_FILE, "r") as f:
+            raw = f.read().strip()
+        if not raw or raw == "{}":
+            return
+
+        data = json.loads(raw)
+        if not data:
+            return
+
+        # Check if table already has data
+        existing_count = await CollectorRequirement.all().count()
+        if existing_count > 0:
+            log.info("CollectorRequirement table already has %s entries, skipping migration.", existing_count)
+            return
+
+        migrated = 0
+        errors = 0
+
+        if isinstance(data, dict):
+            for ball_name, specials in data.items():
+                ball = _find_ball_by_name(ball_name)
+                if not ball:
+                    log.warning("Migration: ball '%s' not found, skipping.", ball_name)
+                    errors += 1
+                    continue
+
+                if isinstance(specials, dict):
+                    for special_name, amount in specials.items():
+                        special = await _find_special_by_name(special_name)
+                        if not special:
+                            log.warning("Migration: special '%s' not found, skipping.", special_name)
+                            errors += 1
+                            continue
+                        try:
+                            amount = int(amount)
+                            if not (1 <= amount <= 9999):
+                                raise ValueError
+                        except (ValueError, TypeError):
+                            log.warning("Migration: invalid amount '%s' for %s/%s, skipping.", amount, ball_name, special_name)
+                            errors += 1
+                            continue
+
+                        await _upsert_req(ball.pk, special.pk, amount)
+                        migrated += 1
+
+                elif isinstance(specials, list):
+
+                    for entry in specials:
+                        if isinstance(entry, dict):
+                            special_name = entry.get("special") or entry.get("special_name")
+                            amount = entry.get("amount")
+                        elif isinstance(entry, (list, tuple)) and len(entry) >= 2:
+                            special_name, amount = entry[0], entry[1]
+                        else:
+                            continue
+
+                        special = await _find_special_by_name(special_name)
+                        if not special:
+                            log.warning("Migration: special '%s' not found, skipping.", special_name)
+                            errors += 1
+                            continue
+                        try:
+                            amount = int(amount)
+                            if not (1 <= amount <= 9999):
+                                raise ValueError
+                        except (ValueError, TypeError):
+                            log.warning("Migration: invalid amount '%s', skipping.", amount)
+                            errors += 1
+                            continue
+
+                        await _upsert_req(ball.pk, special.pk, amount)
+                        migrated += 1
+
+        elif isinstance(data, list):
+            for entry in data:
+                if not isinstance(entry, dict):
+                    continue
+                ball_name = entry.get("ball") or entry.get("country") or entry.get("ball_name")
+                special_name = entry.get("special") or entry.get("special_name")
+                amount = entry.get("amount")
+
+                ball = _find_ball_by_name(ball_name) if ball_name else None
+                if not ball:
+                    log.warning("Migration: ball '%s' not found, skipping.", ball_name)
+                    errors += 1
+                    continue
+
+                special = await _find_special_by_name(special_name) if special_name else None
+                if not special:
+                    log.warning("Migration: special '%s' not found, skipping.", special_name)
+                    errors += 1
+                    continue
+
+                try:
+                    amount = int(amount)
+                    if not (1 <= amount <= 9999):
+                        raise ValueError
+                except (ValueError, TypeError):
+                    log.warning("Migration: invalid amount '%s', skipping.", amount)
+                    errors += 1
+                    continue
+
+                await _upsert_req(ball.pk, special.pk, amount)
+                migrated += 1
+
+        # Mark migration as done
+        with open(MIGRATION_MARKER, "w") as f:
+            f.write(f"Migrated {migrated} requirements. Errors: {errors}.\n")
+
+        log.info("Migrated %s requirements from requirements.txt to database. Errors: %s", migrated, errors)
+
+    except Exception:
+        log.exception("Failed to migrate requirements.txt")
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
