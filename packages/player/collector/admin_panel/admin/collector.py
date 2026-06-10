@@ -84,6 +84,7 @@ class CollectorClaimAdmin(admin.ModelAdmin):
     readonly_fields = ("ball_instance", "claimed_at")
     ordering = ("-claimed_at",)
 
+
     form = CollectorClaimAddForm
     add_form = CollectorClaimAddForm
 
@@ -104,6 +105,7 @@ class CollectorClaimAdmin(admin.ModelAdmin):
 
     def get_fields(self, request, obj=None):
         if obj is None:
+
             return ("player", "requirement")
 
         return ("player", "ball_instance", "requirement", "claimed_at")
@@ -126,6 +128,9 @@ class CollectorClaimAdmin(admin.ModelAdmin):
                 attack_bonus=0,
                 health_bonus=0,
                 catch_date=timezone.now(),
+                favorite=False,
+                tradeable=True,
+                server_id=None,
             )
             obj.ball_instance = ball_instance
         super().save_model(request, obj, form, change)
