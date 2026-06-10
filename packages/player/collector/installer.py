@@ -86,74 +86,104 @@ def add_to_config():
     with open(CONFIG, "w") as f:
         f.writelines(lines)
 
-def _yaml_dump_preserve(cfg: dict, path: str):
-    """Dump YAML while preserving order and avoiding scrambled output.
-    Tries ruamel.yaml first (preserves comments), falls back to pyyaml."""
-    try:
-        from ruamel.yaml import YAML
-        from ruamel.yaml.comments import CommentedMap
-        yaml = YAML()
-        yaml.preserve_quotes = True
-        yaml.width = 120
-        # Convert plain dict to CommentedMap to preserve structure
-        with open(path, "r") as f:
-            data = yaml.load(f)
-        # Update data with cfg values
-        for key, value in cfg.items():
-            data[key] = value
-        with open(path, "w") as f:
-            yaml.dump(data, f)
+def _add_list_to_config(key: str, value: str):
+    """
+    Append a value to a YAML list in config.yml by text manipulation.
+    Preserves comments, formatting, and order.
+    """
+    with open(CONFIG, "r") as f:
+        lines = f.readlines()
+
+    # Check if value already exists
+    if any(value.strip() in l for l in lines):
         return
-    except ImportError:
-        pass
-    # Fallback: pyyaml with sort_keys=False
-    import yaml
-    with open(path, "w") as f:
-        yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+    # Find the key (e.g., "extra-tortoise-models:")
+    key_line = None
+    for i, line in enumerate(lines):
+        if line.strip().startswith(key + ":"):
+            key_line = i
+            break
+
+    if key_line is None:
+        # Key doesn't exist, append at end of file
+        lines.append("\n")
+        lines.append(f"{key}:\n")
+        lines.append(f"  - {value}\n")
+    else:
+        # Key exists, find the last item in the list and insert after
+        insert_after = key_line
+        for i in range(key_line + 1, len(lines)):
+            line = lines[i]
+            # Check if this is a list item (starts with "  - ")
+            if line.strip().startswith("-"):
+                insert_after = i
+            # If we hit a non-list, non-empty, non-comment line, the list ended
+            elif line.strip() and not line.strip().startswith("#"):
+                break
+        lines.insert(insert_after + 1, f"  - {value}\n")
+
+    with open(CONFIG, "w") as f:
+        f.writelines(lines)
+
+def _remove_from_config_list(key: str, value: str):
+    """
+    Remove a value from a YAML list in config.yml by text manipulation.
+    Preserves comments, formatting, and order.
+    """
+    with open(CONFIG, "r") as f:
+        lines = f.readlines()
+
+    # Find the key
+    key_line = None
+    for i, line in enumerate(lines):
+        if line.strip().startswith(key + ":"):
+            key_line = i
+            break
+
+    if key_line is None:
+        return
+
+    # Find and remove the line containing the value
+    new_lines = []
+    in_list = False
+    for i, line in enumerate(lines):
+        if i == key_line:
+            in_list = True
+            new_lines.append(line)
+            continue
+        if in_list:
+            if line.strip().startswith("-"):
+                if value.strip() not in line:
+                    new_lines.append(line)
+                # else: skip this line (remove it)
+            elif line.strip() and not line.strip().startswith("#"):
+                # List ended
+                in_list = False
+                new_lines.append(line)
+            else:
+                new_lines.append(line)
+        else:
+            new_lines.append(line)
+
+    with open(CONFIG, "w") as f:
+        f.writelines(new_lines)
 
 def add_django_app_to_config():
     """Add collector_admin to extra-django-apps in config.yml."""
-    try:
-        import yaml
-        with open(CONFIG, "r") as f:
-            cfg = yaml.safe_load(f)
-        apps = cfg.get("extra-django-apps") or []
-        if "collector_admin" not in apps:
-            apps.append("collector_admin")
-        cfg["extra-django-apps"] = apps
-        _yaml_dump_preserve(cfg, CONFIG)
-    except Exception:
-        pass
+    _add_list_to_config("extra-django-apps", "collector_admin")
 
 def add_tortoise_models_to_config():
     """Add collector models to extra-tortoise-models in config.yml."""
-    try:
-        import yaml
-        with open(CONFIG, "r") as f:
-            cfg = yaml.safe_load(f) or {}
-        models = cfg.get("extra-tortoise-models") or []
-        entry = "ballsdex.packages.collector.models"
-        if entry not in models:
-            models.append(entry)
-            cfg["extra-tortoise-models"] = models
-            _yaml_dump_preserve(cfg, CONFIG)
-    except Exception:
-        pass
+    _add_list_to_config("extra-tortoise-models", "ballsdex.packages.collector.models")
 
 def remove_tortoise_models_from_config():
     """Remove collector models from extra-tortoise-models in config.yml."""
-    try:
-        import yaml
-        with open(CONFIG, "r") as f:
-            cfg = yaml.safe_load(f) or {}
-        models = cfg.get("extra-tortoise-models") or []
-        entry = "ballsdex.packages.collector.models"
-        if entry in models:
-            models.remove(entry)
-            cfg["extra-tortoise-models"] = models
-            _yaml_dump_preserve(cfg, CONFIG)
-    except Exception:
-        pass
+    _remove_from_config_list("extra-tortoise-models", "ballsdex.packages.collector.models")
+
+def remove_django_app_from_config():
+    """Remove collector_admin from extra-django-apps in config.yml."""
+    _remove_from_config_list("extra-django-apps", "collector_admin")
 
 def run_migrations():
     """Run makemigrations + migrate for collector_admin."""
@@ -176,19 +206,6 @@ def remove_from_config():
     lines = [l for l in lines if "ballsdex.packages.collector" not in l]
     with open(CONFIG, "w") as f:
         f.writelines(lines)
-
-def remove_django_app_from_config():
-    try:
-        import yaml
-        with open(CONFIG, "r") as f:
-            cfg = yaml.safe_load(f)
-        apps = cfg.get("extra-django-apps") or []
-        if "collector_admin" in apps:
-            apps.remove("collector_admin")
-        cfg["extra-django-apps"] = apps
-        _yaml_dump_preserve(cfg, CONFIG)
-    except Exception:
-        pass
 
 def delete_files():
     import shutil
