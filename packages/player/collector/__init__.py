@@ -14,7 +14,7 @@ async def setup(bot: "BallsDexBot"):
     try:
         await _migrate_requirements()
     except Exception:
-        log.warning("requirements.txt migration failed or skipped", exc_info=True)
+        log.exception("requirements.txt migration failed")
 
     admin_cog = bot.get_cog("Admin")
     if admin_cog and admin_cog.__cog_app_commands_group__:
