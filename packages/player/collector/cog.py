@@ -1,5 +1,7 @@
 """
 Collector package for BallsDex :)))
+Uses Tortoise ORM to access collector_requirement and collector_claim tables.
+No Django imports — the bot is a separate process.
 """
 
 from __future__ import annotations
@@ -9,10 +11,11 @@ from collections import defaultdict
 from typing import TYPE_CHECKING
 
 import discord
-from asgiref.sync import sync_to_async
 from discord import app_commands
 from discord.ext import commands
 from discord.ui import Modal, TextInput
+from tortoise import fields
+from tortoise.models import Model
 
 from ballsdex.core.models import BallInstance, Player, Special
 from ballsdex.core.models import balls as balls_cache
@@ -29,57 +32,76 @@ log = logging.getLogger("ballsdex.packages.collector")
 GROUPS_PER_PAGE = 7
 
 
-# ── DB helpers (async wrappers) ───────────────────────────────────────────────
+# ── Tortoise models mirroring the Django tables ───────────────────────────────
 
-async def _get_reqs(ball_id: int) -> list:
-    from collector_admin.models import CollectorRequirement
-    return await sync_to_async(list)(
-        CollectorRequirement.objects.filter(ball_id=ball_id).select_related("special").order_by("amount")
-    )
+class CollectorRequirement(Model):
+    id = fields.IntField(pk=True)
+    ball = fields.ForeignKeyField("models.Ball", related_name="collector_requirements")
+    special = fields.ForeignKeyField("models.Special", related_name="collector_requirements")
+    amount = fields.IntField()
+
+    class Meta:
+        table = "collector_requirement"
 
 
-async def _get_all_reqs(special_name: str | None = None) -> list:
-    from collector_admin.models import CollectorRequirement
-    qs = CollectorRequirement.objects.select_related("ball", "special").order_by("ball__country", "amount")
+class CollectorClaim(Model):
+    id = fields.IntField(pk=True)
+    player = fields.ForeignKeyField("models.Player", related_name="collector_claims")
+    ball_instance = fields.ForeignKeyField("models.BallInstance", related_name="collector_claim", unique=True)
+    requirement = fields.ForeignKeyField("models.CollectorRequirement", related_name="claims")
+    claimed_at = fields.DatetimeField(auto_now_add=True)
+
+    class Meta:
+        table = "collector_claim"
+
+
+# ── DB helpers ────────────────────────────────────────────────────────────────
+
+async def _get_reqs(ball_id: int) -> list[CollectorRequirement]:
+    return await CollectorRequirement.filter(ball_id=ball_id).prefetch_related("special").order_by("amount")
+
+
+async def _get_all_reqs(special_name: str | None = None) -> list[CollectorRequirement]:
+    qs = CollectorRequirement.all().prefetch_related("ball", "special").order_by("ball__country", "amount")
     if special_name:
-        qs = qs.filter(special__name__iexact=special_name)
-    return await sync_to_async(list)(qs)
+        reqs = await qs
+        return [r for r in reqs if r.special.name.lower() == special_name.strip().lower()]
+    return await qs
 
 
-async def _upsert_req(ball_id: int, special_id: int, amount: int):
-    from collector_admin.models import CollectorRequirement
-    await sync_to_async(CollectorRequirement.objects.update_or_create)(
-        ball_id=ball_id,
-        special_id=special_id,
+async def _upsert_req(ball_id: int, special_id: int, amount: int) -> CollectorRequirement:
+    req, _ = await CollectorRequirement.get_or_create(
+        ball_id=ball_id, special_id=special_id,
         defaults={"amount": amount},
     )
+    if req.amount != amount:
+        req.amount = amount
+        await req.save()
+    return req
 
 
 async def _delete_req(ball_id: int, special_id: int | None = None):
-    from collector_admin.models import CollectorRequirement
-    qs = CollectorRequirement.objects.filter(ball_id=ball_id)
+    qs = CollectorRequirement.filter(ball_id=ball_id)
     if special_id:
         qs = qs.filter(special_id=special_id)
-    await sync_to_async(qs.delete)()
+    await qs.delete()
 
 
 async def _has_claimed(user_id: int, ball_id: int, special_id: int) -> bool:
-    from collector_admin.models import CollectorClaim
-    return await sync_to_async(
-        CollectorClaim.objects.filter(
-            player__discord_id=user_id,
-            requirement__ball_id=ball_id,
-            requirement__special_id=special_id,
-        ).exists
-    )()
+    req = await CollectorRequirement.get_or_none(ball_id=ball_id, special_id=special_id)
+    if not req:
+        return False
+    return await CollectorClaim.filter(
+        player__discord_id=user_id,
+        requirement_id=req.pk,
+    ).exists()
 
 
-async def _mark_claimed(player, ball_instance, req_id: int):
-    from collector_admin.models import CollectorClaim
-    await sync_to_async(CollectorClaim.objects.create)(
+async def _mark_claimed(player, ball_instance, req: CollectorRequirement):
+    await CollectorClaim.create(
         player=player,
         ball_instance=ball_instance,
-        requirement_id=req_id,
+        requirement=req,
     )
 
 
@@ -117,7 +139,7 @@ async def _do_claim(
     interaction: discord.Interaction,
     ball,
     player,
-    req,
+    req: CollectorRequirement,
 ) -> None:
     if await _has_claimed(interaction.user.id, req.ball_id, req.special_id):
         await interaction.followup.send(
@@ -137,11 +159,7 @@ async def _do_claim(
         attack_bonus=0, health_bonus=0, server_id=interaction.guild_id,
     )
 
-    # Record claim in DB — use Django BallInstance/Player via sync_to_async
-    from bd_models.models import BallInstance as DjBallInstance, Player as DjPlayer
-    dj_instance = await sync_to_async(DjBallInstance.objects.get)(pk=new_instance.pk)
-    dj_player = await sync_to_async(DjPlayer.objects.get)(discord_id=interaction.user.id)
-    await _mark_claimed(dj_player, dj_instance, req.pk)
+    await _mark_claimed(player, new_instance, req)
 
     log.info("User %s claimed collector %s / special %s (#%X)",
              interaction.user, ball.country, special.name, new_instance.pk)
@@ -325,7 +343,7 @@ class CollectorAdminGroup(app_commands.Group):
     @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
     @app_commands.describe(
         countryball="The ball whose requirement you want to remove",
-        special="Which specific requirement to delete (leave empty to delete all for this ball)",
+        special="Which specific requirement to delete (leave empty to delete all)",
     )
     async def collector_delete(
         self,
@@ -400,10 +418,9 @@ class CollectorAdminGroup(app_commands.Group):
             )
             return
 
-        from collector_admin.models import CollectorClaim
         lines = []
         for r in reqs:
-            count = await sync_to_async(CollectorClaim.objects.filter(requirement=r).count)()
+            count = await CollectorClaim.filter(requirement=r).count()
             lines.append(f"• ≥**{r.amount}** → **{r.special.name}** — {count} claimed")
 
         await interaction.response.send_message(
@@ -435,7 +452,6 @@ class CollectorCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         player, _ = await Player.get_or_create(discord_id=interaction.user.id)
 
-        # ── No ball: show overview ────────────────────────────────────────────
         if countryball is None:
             all_reqs = await _get_all_reqs()
             if not all_reqs:
@@ -484,7 +500,6 @@ class CollectorCog(commands.Cog):
             await interaction.followup.send("\n".join(lines), ephemeral=True)
             return
 
-        # ── Ball specified ────────────────────────────────────────────────────
         ball = countryball
         reqs = await _get_reqs(ball.pk)
         if not reqs:
