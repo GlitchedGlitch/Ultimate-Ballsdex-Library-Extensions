@@ -48,25 +48,36 @@ async def _migrate_requirements():
     }
     Skips if migration already done or if requirements.txt is empty/missing.
     """
+    log.info("Checking requirements.txt migration...")
+
     if os.path.isfile(MIGRATION_MARKER):
+        log.info("Migration already completed (marker file exists).")
         return
     if not os.path.isfile(REQUIREMENTS_FILE):
+        log.info("No requirements.txt file found at %s", REQUIREMENTS_FILE)
         return
 
     try:
         with open(REQUIREMENTS_FILE, "r") as f:
             raw = f.read().strip()
+        log.info("Read requirements.txt: %s bytes", len(raw))
+
         if not raw or raw == "{}":
+            log.info("requirements.txt is empty, skipping migration.")
             return
 
         data = json.loads(raw)
         if not data:
+            log.info("requirements.txt contains empty JSON, skipping migration.")
             return
 
         # Check if table already has data
         existing_count = await CollectorRequirement.all().count()
         if existing_count > 0:
             log.info("CollectorRequirement table already has %s entries, skipping migration.", existing_count)
+            # Still write marker so we don't check again
+            with open(MIGRATION_MARKER, "w") as f:
+                f.write("Skipped: table already has data.\n")
             return
 
         migrated = 0
@@ -105,10 +116,18 @@ async def _migrate_requirements():
                         errors += 1
                         continue
 
-                    # Verify ball exists in database
+                    # Verify ball exists - try cache first, then DB
                     ball = balls_cache.get(ball_id)
                     if ball is None:
-                        log.warning("Migration: ball_id %s not found in cache, skipping.", ball_id)
+                        # balls_cache might not be populated yet, try direct DB query
+                        from ballsdex.core.models import Ball
+                        ball = await Ball.get_or_none(pk=ball_id)
+                        if ball is not None:
+                            # Add to cache for future lookups
+                            balls_cache[ball_id] = ball
+
+                    if ball is None:
+                        log.warning("Migration: ball_id %s not found in cache or database, skipping.", ball_id)
                         errors += 1
                         continue
 
@@ -120,13 +139,16 @@ async def _migrate_requirements():
 
                     await _upsert_req(ball_id, special_id, amount)
                     migrated += 1
+                    log.info("Migrated requirement: ball_id=%s special_id=%s amount=%s", ball_id, special_id, amount)
 
         # Mark migration as done
         with open(MIGRATION_MARKER, "w") as f:
             f.write(f"Migrated {migrated} requirements. Errors: {errors}.\n")
 
-        log.info("Migrated %s requirements from requirements.txt to database. Errors: %s", migrated, errors)
+        log.info("Migration complete: %s requirements migrated, %s errors.", migrated, errors)
 
+    except json.JSONDecodeError as e:
+        log.error("Failed to parse requirements.txt as JSON: %s", e)
     except Exception:
         log.exception("Failed to migrate requirements.txt")
 
