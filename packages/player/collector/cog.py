@@ -37,7 +37,8 @@ MIGRATION_MARKER = "/code/ballsdex/packages/collector/.requirements_migrated"
 
 async def _migrate_requirements():
     """
-    One-time migration: read requirements.txt JSON and insert into database.
+    One-time migration: read requirements.txt JSON, erase existing requirements,
+    and import all from the file.
     Expected format:
     {
       "ball_id": [
@@ -71,14 +72,13 @@ async def _migrate_requirements():
             log.info("requirements.txt contains empty JSON, skipping migration.")
             return
 
-        # Check if table already has data
+        # ── ERASE existing requirements ───────────────────────────────────────
         existing_count = await CollectorRequirement.all().count()
         if existing_count > 0:
-            log.info("CollectorRequirement table already has %s entries, skipping migration.", existing_count)
-            # Still write marker so we don't check again
-            with open(MIGRATION_MARKER, "w") as f:
-                f.write("Skipped: table already has data.\n")
-            return
+            log.info("Erasing %s existing CollectorRequirement entries...", existing_count)
+            # Delete all existing requirements (claims will cascade or be orphaned)
+            await CollectorRequirement.all().delete()
+            log.info("Existing requirements erased.")
 
         migrated = 0
         errors = 0
