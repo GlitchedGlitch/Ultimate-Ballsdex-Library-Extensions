@@ -86,6 +86,31 @@ def add_to_config():
     with open(CONFIG, "w") as f:
         f.writelines(lines)
 
+def _yaml_dump_preserve(cfg: dict, path: str):
+    """Dump YAML while preserving order and avoiding scrambled output.
+    Tries ruamel.yaml first (preserves comments), falls back to pyyaml."""
+    try:
+        from ruamel.yaml import YAML
+        from ruamel.yaml.comments import CommentedMap
+        yaml = YAML()
+        yaml.preserve_quotes = True
+        yaml.width = 120
+        # Convert plain dict to CommentedMap to preserve structure
+        with open(path, "r") as f:
+            data = yaml.load(f)
+        # Update data with cfg values
+        for key, value in cfg.items():
+            data[key] = value
+        with open(path, "w") as f:
+            yaml.dump(data, f)
+        return
+    except ImportError:
+        pass
+    # Fallback: pyyaml with sort_keys=False
+    import yaml
+    with open(path, "w") as f:
+        yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
 def add_django_app_to_config():
     """Add collector_admin to extra-django-apps in config.yml."""
     try:
@@ -96,10 +121,9 @@ def add_django_app_to_config():
         if "collector_admin" not in apps:
             apps.append("collector_admin")
         cfg["extra-django-apps"] = apps
-        with open(CONFIG, "w") as f:
-            yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+        _yaml_dump_preserve(cfg, CONFIG)
     except Exception:
-        pass  # non-fatal — admin panel works without it until manually added
+        pass
 
 def add_tortoise_models_to_config():
     """Add collector models to extra-tortoise-models in config.yml."""
@@ -107,16 +131,14 @@ def add_tortoise_models_to_config():
         import yaml
         with open(CONFIG, "r") as f:
             cfg = yaml.safe_load(f) or {}
-
         models = cfg.get("extra-tortoise-models") or []
         entry = "ballsdex.packages.collector.models"
         if entry not in models:
             models.append(entry)
             cfg["extra-tortoise-models"] = models
-            with open(CONFIG, "w") as f:
-                yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+            _yaml_dump_preserve(cfg, CONFIG)
     except Exception:
-        pass  # non-fatal
+        pass
 
 def remove_tortoise_models_from_config():
     """Remove collector models from extra-tortoise-models in config.yml."""
@@ -124,14 +146,12 @@ def remove_tortoise_models_from_config():
         import yaml
         with open(CONFIG, "r") as f:
             cfg = yaml.safe_load(f) or {}
-
         models = cfg.get("extra-tortoise-models") or []
         entry = "ballsdex.packages.collector.models"
         if entry in models:
             models.remove(entry)
             cfg["extra-tortoise-models"] = models
-            with open(CONFIG, "w") as f:
-                yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+            _yaml_dump_preserve(cfg, CONFIG)
     except Exception:
         pass
 
@@ -166,8 +186,7 @@ def remove_django_app_from_config():
         if "collector_admin" in apps:
             apps.remove("collector_admin")
         cfg["extra-django-apps"] = apps
-        with open(CONFIG, "w") as f:
-            yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+        _yaml_dump_preserve(cfg, CONFIG)
     except Exception:
         pass
 
@@ -556,12 +575,12 @@ def _is_v3() -> bool:
     try:
         from django.apps import apps
         apps.check_apps_ready()
-        return True  # Django is up — this is v3
+        return True
     except Exception:
         pass
     try:
-        import tortoise  # noqa: F401
-        return False  # Tortoise present, Django not ready — this is v2
+        import tortoise
+        return False
     except ImportError:
         pass
     return True
