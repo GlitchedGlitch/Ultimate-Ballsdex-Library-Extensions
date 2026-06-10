@@ -24,8 +24,8 @@ class CollectorClaimInline(admin.TabularInline):
 
 @admin.register(CollectorRequirement)
 class CollectorRequirementAdmin(admin.ModelAdmin):
-    list_display = ("col_emoji", "ball", "special", "amount", "claim_count")
-    list_display_links = ("ball",)
+    list_display = ("col_emoji", "col_ball", "amount", "col_special", "claim_count")
+    list_display_links = ("col_ball",)
     list_filter = ("special", "ball__enabled")
     search_fields = ("ball__country", "special__name")
     ordering = ("ball__country", "amount")
@@ -41,12 +41,19 @@ class CollectorRequirementAdmin(admin.ModelAdmin):
     def col_emoji(self, obj):
         if obj.ball.emoji_id:
             return format_html(
-                '<img src="https://cdn.discordapp.com/emojis/{}.png?size=32" '
-                'style="height:24px;" title="{}"/>',
-                obj.ball.emoji_id, obj.ball.country,
+                '<img src="https://cdn.discordapp.com/emojis/{}.png" width="20" height="20" alt="{}">',
+                obj.ball.emoji_id, obj.ball.country
             )
         return "—"
     col_emoji.short_description = ""
+
+    def col_ball(self, obj):
+        return obj.ball.country
+    col_ball.short_description = "Collectible"
+
+    def col_special(self, obj):
+        return obj.special.name
+    col_special.short_description = "Reward Special"
 
     def claim_count(self, obj):
         return obj.claims.count()
@@ -54,6 +61,14 @@ class CollectorRequirementAdmin(admin.ModelAdmin):
 
 
 # ── CollectorClaim admin ──────────────────────────────────────────────────────
+
+class CollectorClaimAddForm(admin.ModelForm):
+    """Custom form for adding CollectorClaim with dropdowns."""
+
+    class Meta:
+        model = CollectorClaim
+        fields = ("player", "requirement")
+
 
 @admin.register(CollectorClaim)
 class CollectorClaimAdmin(admin.ModelAdmin):
@@ -65,11 +80,54 @@ class CollectorClaimAdmin(admin.ModelAdmin):
         "requirement__ball__country",
         "requirement__special__name",
     )
-    readonly_fields = ("player", "ball_instance", "requirement", "claimed_at")
+    readonly_fields = ("ball_instance", "claimed_at")
     ordering = ("-claimed_at",)
 
+    # Use custom form for add, default for change
+    form = CollectorClaimAddForm
+    add_form = CollectorClaimAddForm
+
     def has_add_permission(self, request):
+        return True
+
+    def has_change_permission(self, request, obj=None):
+        # Allow viewing but not editing existing claims
         return False
+
+    def has_delete_permission(self, request, obj=None):
+        return True
+
+    def get_form(self, request, obj=None, **kwargs):
+        if obj is None:
+            kwargs["form"] = self.add_form
+        return super().get_form(request, obj, **kwargs)
+
+    def get_fields(self, request, obj=None):
+        if obj is None:
+            # Add form: only show player and requirement dropdowns
+            return ("player", "requirement")
+        # Change form: show all readonly fields
+        return ("player", "ball_instance", "requirement", "claimed_at")
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj is None:
+            return ()
+        return self.readonly_fields
+
+    def save_model(self, request, obj, form, change):
+        if not change:
+            # On add: create a BallInstance automatically
+            from bd_models.models import BallInstance
+            req = obj.requirement
+            ball_instance = BallInstance.objects.create(
+                player=obj.player,
+                ball=req.ball,
+                special=req.special,
+                attack_bonus=0,
+                health_bonus=0,
+            )
+            obj.ball_instance = ball_instance
+        super().save_model(request, obj, form, change)
 
     def col_ball_instance(self, obj):
         return str(obj.ball_instance)
