@@ -19,7 +19,7 @@ ADMIN_FILES = [
     ("admin_panel/admin/collector.py", f"{ADMIN_PANEL_DST}/admin/collector.py"),
 ]
 
-BOT_FILES = ("__init__.py", "cog.py")
+BOT_FILES = ("__init__.py", "cog.py", "models.py")
 FOOTER = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
 FOOTER_TIMEOUT = FOOTER + " • Timed out"
 
@@ -107,8 +107,41 @@ def add_django_app_to_config():
             with open(CONFIG, "w") as f:
                 yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
     except Exception:
-        pass  # non-fatal — admin panel works without it until manually added
+        pass 
 
+def add_tortoise_models_to_config():
+    """Add collector models to extra-tortoise-models in config.yml."""
+    try:
+        import yaml
+        with open(CONFIG, "r") as f:
+            cfg = yaml.safe_load(f) or {}
+        
+        models = cfg.get("extra-tortoise-models") or []
+        entry = "ballsdex.packages.collector.models"
+        if entry not in models:
+            models.append(entry)
+            cfg["extra-tortoise-models"] = models
+            with open(CONFIG, "w") as f:
+                yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+    except Exception:
+        pass 
+
+def remove_tortoise_models_from_config():
+    """Remove collector models from extra-tortoise-models in config.yml."""
+    try:
+        import yaml
+        with open(CONFIG, "r") as f:
+            cfg = yaml.safe_load(f) or {}
+        
+        models = cfg.get("extra-tortoise-models") or []
+        entry = "ballsdex.packages.collector.models"
+        if entry in models:
+            models.remove(entry)
+            cfg["extra-tortoise-models"] = models
+            with open(CONFIG, "w") as f:
+                yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+    except Exception:
+        pass
 
 def run_migrations():
     """Run makemigrations + migrate for collector_admin."""
@@ -243,6 +276,7 @@ class ConfirmDeleteView(View):
             "Unloading bot extension",
             "Deleting package files",
             "Removing from config.yml",
+            "Removing Tortoise models",
         ]
         steps = [(s, None) for s in DELETE_STEPS]
 
@@ -275,7 +309,10 @@ class ConfirmDeleteView(View):
             remove_from_config()
             remove_django_app_from_config()
             await update(2)
-
+            
+            remove_tortoise_models_from_config()
+            await update(3)
+            
             self.parent.installed = False
             self.parent.done = True
             self.stop()
@@ -358,6 +395,7 @@ class CollectorInstallerView(View):
             "Downloading bot files",
             "Creating requirements file",
             "Adding to config.yml",
+            "Registering Tortoise models",
             "Downloading admin panel files",
             "Registering admin panel app",
             "Running migrations",
@@ -391,17 +429,20 @@ class CollectorInstallerView(View):
             add_to_config()
             await update(3)
 
-            download_admin_files()
+            add_tortoise_models_to_config()
             await update(4)
 
-            add_django_app_to_config()
+            download_admin_files()
             await update(5)
 
-            run_migrations()
+            add_django_app_to_config()
             await update(6)
 
-            await self.bot.load_extension("ballsdex.packages.collector")
+            run_migrations()
             await update(7)
+
+            await self.bot.load_extension("ballsdex.packages.collector")
+            await update(8)
 
             from ballsdex.settings import settings
             import asyncio
@@ -409,7 +450,7 @@ class CollectorInstallerView(View):
                 self.bot.tree.sync(),
                 *[self.bot.tree.sync(guild=discord.Object(id=gid)) for gid in settings.admin_guild_ids]
             )
-            await update(8)
+            await update(9)
 
             self.done = True
             self.stop()
