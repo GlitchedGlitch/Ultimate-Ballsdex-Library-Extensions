@@ -105,14 +105,10 @@ async def _migrate_requirements():
                         errors += 1
                         continue
 
-                    # Verify ball and special exist in database
-                    ball = await balls_cache.get(ball_id) or None
+                    # Verify ball exists in database
+                    ball = balls_cache.get(ball_id)
                     if ball is None:
-                        # Try fetching from DB directly
-                        from ballsdex.core.models import Ball
-                        ball = await Ball.get_or_none(pk=ball_id)
-                    if ball is None:
-                        log.warning("Migration: ball_id %s not found in database, skipping.", ball_id)
+                        log.warning("Migration: ball_id %s not found in cache, skipping.", ball_id)
                         errors += 1
                         continue
 
