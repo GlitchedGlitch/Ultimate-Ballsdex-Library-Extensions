@@ -30,7 +30,7 @@ log = logging.getLogger("ballsdex.packages.collector")
 
 GROUPS_PER_PAGE = 7
 
-# ── Requirements.txt migration ──────────────────────────────────────────────
+# ── Requirements.txt migration ────────────────────────────────────────────────
 
 REQUIREMENTS_FILE = "/code/ballsdex/packages/collector/requirements.txt"
 MIGRATION_MARKER = "/code/ballsdex/packages/collector/.requirements_migrated"
@@ -38,6 +38,14 @@ MIGRATION_MARKER = "/code/ballsdex/packages/collector/.requirements_migrated"
 async def _migrate_requirements():
     """
     One-time migration: read requirements.txt JSON and insert into database.
+    Expected format:
+    {
+      "ball_id": [
+        {"ball_id": 1, "ball_name": "...", "amount": 3, "special_id": 1, "special_name": "..."},
+        ...
+      ],
+      ...
+    }
     Skips if migration already done or if requirements.txt is empty/missing.
     """
     if os.path.isfile(MIGRATION_MARKER):
@@ -64,92 +72,58 @@ async def _migrate_requirements():
         migrated = 0
         errors = 0
 
+        # Expected format: {"ball_id": [{"ball_id": 1, "ball_name": "...", "amount": 3, "special_id": 1, "special_name": "..."}, ...]}
         if isinstance(data, dict):
-            for ball_name, specials in data.items():
-                ball = _find_ball_by_name(ball_name)
-                if not ball:
-                    log.warning("Migration: ball '%s' not found, skipping.", ball_name)
+            for ball_id_str, entries in data.items():
+                if not isinstance(entries, list):
+                    log.warning("Migration: expected list for ball_id %s, got %s, skipping.", ball_id_str, type(entries).__name__)
                     errors += 1
                     continue
 
-                if isinstance(specials, dict):
-                    for special_name, amount in specials.items():
-                        special = await _find_special_by_name(special_name)
-                        if not special:
-                            log.warning("Migration: special '%s' not found, skipping.", special_name)
-                            errors += 1
-                            continue
-                        try:
-                            amount = int(amount)
-                            if not (1 <= amount <= 9999):
-                                raise ValueError
-                        except (ValueError, TypeError):
-                            log.warning("Migration: invalid amount '%s' for %s/%s, skipping.", amount, ball_name, special_name)
-                            errors += 1
-                            continue
+                for entry in entries:
+                    if not isinstance(entry, dict):
+                        log.warning("Migration: expected dict entry, got %s, skipping.", type(entry).__name__)
+                        errors += 1
+                        continue
 
-                        await _upsert_req(ball.pk, special.pk, amount)
-                        migrated += 1
+                    ball_id = entry.get("ball_id")
+                    special_id = entry.get("special_id")
+                    amount = entry.get("amount")
 
-                elif isinstance(specials, list):
+                    # Validate IDs
+                    try:
+                        ball_id = int(ball_id)
+                        special_id = int(special_id)
+                        amount = int(amount)
+                        if not (1 <= amount <= 9999):
+                            raise ValueError
+                    except (ValueError, TypeError):
+                        log.warning(
+                            "Migration: invalid values ball_id=%s special_id=%s amount=%s, skipping.",
+                            ball_id, special_id, amount
+                        )
+                        errors += 1
+                        continue
 
-                    for entry in specials:
-                        if isinstance(entry, dict):
-                            special_name = entry.get("special") or entry.get("special_name")
-                            amount = entry.get("amount")
-                        elif isinstance(entry, (list, tuple)) and len(entry) >= 2:
-                            special_name, amount = entry[0], entry[1]
-                        else:
-                            continue
+                    # Verify ball and special exist in database
+                    ball = await balls_cache.get(ball_id) or None
+                    if ball is None:
+                        # Try fetching from DB directly
+                        from ballsdex.core.models import Ball
+                        ball = await Ball.get_or_none(pk=ball_id)
+                    if ball is None:
+                        log.warning("Migration: ball_id %s not found in database, skipping.", ball_id)
+                        errors += 1
+                        continue
 
-                        special = await _find_special_by_name(special_name)
-                        if not special:
-                            log.warning("Migration: special '%s' not found, skipping.", special_name)
-                            errors += 1
-                            continue
-                        try:
-                            amount = int(amount)
-                            if not (1 <= amount <= 9999):
-                                raise ValueError
-                        except (ValueError, TypeError):
-                            log.warning("Migration: invalid amount '%s', skipping.", amount)
-                            errors += 1
-                            continue
+                    special = await Special.get_or_none(pk=special_id)
+                    if special is None:
+                        log.warning("Migration: special_id %s not found in database, skipping.", special_id)
+                        errors += 1
+                        continue
 
-                        await _upsert_req(ball.pk, special.pk, amount)
-                        migrated += 1
-
-        elif isinstance(data, list):
-            for entry in data:
-                if not isinstance(entry, dict):
-                    continue
-                ball_name = entry.get("ball") or entry.get("country") or entry.get("ball_name")
-                special_name = entry.get("special") or entry.get("special_name")
-                amount = entry.get("amount")
-
-                ball = _find_ball_by_name(ball_name) if ball_name else None
-                if not ball:
-                    log.warning("Migration: ball '%s' not found, skipping.", ball_name)
-                    errors += 1
-                    continue
-
-                special = await _find_special_by_name(special_name) if special_name else None
-                if not special:
-                    log.warning("Migration: special '%s' not found, skipping.", special_name)
-                    errors += 1
-                    continue
-
-                try:
-                    amount = int(amount)
-                    if not (1 <= amount <= 9999):
-                        raise ValueError
-                except (ValueError, TypeError):
-                    log.warning("Migration: invalid amount '%s', skipping.", amount)
-                    errors += 1
-                    continue
-
-                await _upsert_req(ball.pk, special.pk, amount)
-                migrated += 1
+                    await _upsert_req(ball_id, special_id, amount)
+                    migrated += 1
 
         # Mark migration as done
         with open(MIGRATION_MARKER, "w") as f:
