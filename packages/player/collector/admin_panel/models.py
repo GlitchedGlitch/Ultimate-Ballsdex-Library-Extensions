@@ -6,8 +6,7 @@ from bd_models.models import Ball, BallInstance, Player, Special
 
 class CollectorRequirement(models.Model):
     """
-    A collector requirement: own at least `amount` of `ball` to claim `special`.
-    Multiple requirements can exist for the same ball with different specials/amounts.
+    Collector requirements
     """
     ball = models.ForeignKey(
         Ball,
