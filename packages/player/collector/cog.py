@@ -1,6 +1,5 @@
 """
 Collector package for BallsDex :)))
-Data stored in DB via collector_admin Django models.
 """
 
 from __future__ import annotations
