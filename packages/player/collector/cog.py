@@ -33,12 +33,11 @@ GROUPS_PER_PAGE = 7
 # ── Requirements.txt migration ────────────────────────────────────────────────
 
 REQUIREMENTS_FILE = "/code/ballsdex/packages/collector/requirements.txt"
-MIGRATION_MARKER = "/code/ballsdex/packages/collector/.requirements_migrated"
+MIGRATION_HASH_FILE = "/code/ballsdex/packages/collector/.requirements_hash"
 
 async def _migrate_requirements():
     """
-    One-time migration: read requirements.txt JSON, erase existing requirements,
-    and import all from the file.
+    Migrate requirements.txt JSON into the database.
     Expected format:
     {
       "ball_id": [
@@ -47,13 +46,10 @@ async def _migrate_requirements():
       ],
       ...
     }
-    Skips if migration already done or if requirements.txt is empty/missing.
+    Skips if requirements.txt is missing/empty or if already migrated same content.
     """
-    log.info("Checking requirements.txt migration...")
+    import hashlib
 
-    if os.path.isfile(MIGRATION_MARKER):
-        log.info("Migration already completed (marker file exists).")
-        return
     if not os.path.isfile(REQUIREMENTS_FILE):
         log.info("No requirements.txt file found at %s", REQUIREMENTS_FILE)
         return
@@ -61,22 +57,31 @@ async def _migrate_requirements():
     try:
         with open(REQUIREMENTS_FILE, "r") as f:
             raw = f.read().strip()
-        log.info("Read requirements.txt: %s bytes", len(raw))
 
         if not raw or raw == "{}":
             log.info("requirements.txt is empty, skipping migration.")
             return
+
+        # Check if already migrated this exact content
+        content_hash = hashlib.md5(raw.encode()).hexdigest()
+        if os.path.isfile(MIGRATION_HASH_FILE):
+            with open(MIGRATION_HASH_FILE, "r") as f:
+                last_hash = f.read().strip()
+            if last_hash == content_hash:
+                log.info("requirements.txt already migrated (content unchanged).")
+                return
 
         data = json.loads(raw)
         if not data:
             log.info("requirements.txt contains empty JSON, skipping migration.")
             return
 
+        log.info("Read requirements.txt: %s bytes, hash=%s", len(raw), content_hash)
+
         # ── ERASE existing requirements ───────────────────────────────────────
         existing_count = await CollectorRequirement.all().count()
         if existing_count > 0:
             log.info("Erasing %s existing CollectorRequirement entries...", existing_count)
-            # Delete all existing requirements (claims will cascade or be orphaned)
             await CollectorRequirement.all().delete()
             log.info("Existing requirements erased.")
 
@@ -119,11 +124,9 @@ async def _migrate_requirements():
                     # Verify ball exists - try cache first, then DB
                     ball = balls_cache.get(ball_id)
                     if ball is None:
-                        # balls_cache might not be populated yet, try direct DB query
                         from ballsdex.core.models import Ball
                         ball = await Ball.get_or_none(pk=ball_id)
                         if ball is not None:
-                            # Add to cache for future lookups
                             balls_cache[ball_id] = ball
 
                     if ball is None:
@@ -141,9 +144,9 @@ async def _migrate_requirements():
                     migrated += 1
                     log.info("Migrated requirement: ball_id=%s special_id=%s amount=%s", ball_id, special_id, amount)
 
-        # Mark migration as done
-        with open(MIGRATION_MARKER, "w") as f:
-            f.write(f"Migrated {migrated} requirements. Errors: {errors}.\n")
+        # Save hash to prevent re-migration of same content
+        with open(MIGRATION_HASH_FILE, "w") as f:
+            f.write(content_hash + "\n")
 
         log.info("Migration complete: %s requirements migrated, %s errors.", migrated, errors)
 
