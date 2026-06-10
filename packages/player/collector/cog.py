@@ -1,7 +1,5 @@
 """
 Collector package for BallsDex :)))
-Uses Tortoise ORM to access collector_requirement and collector_claim tables.
-No Django imports — the bot is a separate process.
 """
 
 from __future__ import annotations
@@ -31,7 +29,6 @@ log = logging.getLogger("ballsdex.packages.collector")
 
 GROUPS_PER_PAGE = 7
 
-
 # ── Tortoise models mirroring the Django tables ───────────────────────────────
 
 class CollectorRequirement(Model):
@@ -42,7 +39,7 @@ class CollectorRequirement(Model):
 
     class Meta:
         table = "collector_requirement"
-
+        app = "models" 
 
 class CollectorClaim(Model):
     id = fields.IntField(pk=True)
@@ -53,13 +50,12 @@ class CollectorClaim(Model):
 
     class Meta:
         table = "collector_claim"
-
+        app = "models"
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
 async def _get_reqs(ball_id: int) -> list[CollectorRequirement]:
     return await CollectorRequirement.filter(ball_id=ball_id).prefetch_related("special").order_by("amount")
-
 
 async def _get_all_reqs(special_name: str | None = None) -> list[CollectorRequirement]:
     qs = CollectorRequirement.all().prefetch_related("ball", "special").order_by("ball__country", "amount")
@@ -67,7 +63,6 @@ async def _get_all_reqs(special_name: str | None = None) -> list[CollectorRequir
         reqs = await qs
         return [r for r in reqs if r.special.name.lower() == special_name.strip().lower()]
     return await qs
-
 
 async def _upsert_req(ball_id: int, special_id: int, amount: int) -> CollectorRequirement:
     req, _ = await CollectorRequirement.get_or_create(
@@ -79,13 +74,11 @@ async def _upsert_req(ball_id: int, special_id: int, amount: int) -> CollectorRe
         await req.save()
     return req
 
-
 async def _delete_req(ball_id: int, special_id: int | None = None):
     qs = CollectorRequirement.filter(ball_id=ball_id)
     if special_id:
         qs = qs.filter(special_id=special_id)
     await qs.delete()
-
 
 async def _has_claimed(user_id: int, ball_id: int, special_id: int) -> bool:
     req = await CollectorRequirement.get_or_none(ball_id=ball_id, special_id=special_id)
@@ -96,14 +89,12 @@ async def _has_claimed(user_id: int, ball_id: int, special_id: int) -> bool:
         requirement_id=req.pk,
     ).exists()
 
-
 async def _mark_claimed(player, ball_instance, req: CollectorRequirement):
     await CollectorClaim.create(
         player=player,
         ball_instance=ball_instance,
         requirement=req,
     )
-
 
 # ── Ball emoji helper ─────────────────────────────────────────────────────────
 
@@ -115,7 +106,6 @@ def _ball_emoji(bot: "BallsDexBot", ball_id: int) -> str:
             return str(emoji)
     return "•"
 
-
 def _find_ball_by_name(name: str):
     name = name.strip().lower()
     for ball in balls_cache.values():
@@ -123,14 +113,12 @@ def _find_ball_by_name(name: str):
             return ball
     return None
 
-
 async def _find_special_by_name(name: str):
     name_lower = name.strip().lower()
     for s in await Special.all():
         if s.name.lower() == name_lower:
             return s
     return None
-
 
 # ── Claim helpers ─────────────────────────────────────────────────────────────
 
@@ -172,7 +160,6 @@ async def _do_claim(
         ephemeral=True,
     )
 
-
 class ClaimSelectView(discord.ui.View):
     def __init__(self, bot, interaction, ball, player, eligible):
         super().__init__(timeout=60)
@@ -203,7 +190,6 @@ class ClaimSelectView(discord.ui.View):
             await self.original.edit_original_response(view=self)
         except Exception:
             pass
-
 
 # ── Bulk modal ────────────────────────────────────────────────────────────────
 
@@ -273,7 +259,7 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
                 continue
 
             await _upsert_req(ball.pk, special.pk, amount)
-            added.append(f"**{ball.country}** — ≥{amount} → {special.name}")
+            added.append(f"**{ball.country}** — ≥{amount} -> {special.name}")
 
         result_lines: list[str] = []
         if added:
@@ -295,7 +281,6 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
                 f"Errors: {len(errors)}",
                 interaction.client,
             )
-
 
 # ── /admin collector ──────────────────────────────────────────────────────────
 
@@ -325,7 +310,7 @@ class CollectorAdminGroup(app_commands.Group):
         ball = countryball
         await _upsert_req(ball.pk, special.pk, amount)
         await interaction.response.send_message(
-            f"Collector requirement set: **{ball.country}** — ≥**{amount}** → **{special.name}**.",
+            f"Collector requirement set: **{ball.country}** — ≥**{amount}** -> **{special.name}**.",
             ephemeral=True,
         )
         await log_action(
@@ -421,13 +406,12 @@ class CollectorAdminGroup(app_commands.Group):
         lines = []
         for r in reqs:
             count = await CollectorClaim.filter(requirement=r).count()
-            lines.append(f"• ≥**{r.amount}** → **{r.special.name}** — {count} claimed")
+            lines.append(f"• ≥**{r.amount}** -> **{r.special.name}** — {count} claimed")
 
         await interaction.response.send_message(
             f"**Collector Requirements — {ball.country}**\n" + "\n".join(lines),
             ephemeral=True,
         )
-
 
 # ── Player-facing cog ─────────────────────────────────────────────────────────
 
@@ -524,8 +508,7 @@ class CollectorCog(commands.Cog):
         for r in reqs:
             bar = make_bar(count, r.amount)
             claimed = await _has_claimed(interaction.user.id, ball.pk, r.special_id)
-            status = " ✅" if claimed else (" 🔓" if count >= r.amount else "")
-            lines.append(f"{r.special.name} - {bar}{status}")
+            lines.append(f"{r.special.name} - {bar}")
             if not claimed and count >= r.amount:
                 eligible.append(r)
 
@@ -576,7 +559,7 @@ class CollectorCog(commands.Cog):
             chunk_num = 1
             for r in grouped[amount]:
                 emoji = _ball_emoji(self.bot, r.ball_id)
-                line = f"* {emoji} {r.ball.country}" if special else f"* {emoji} {r.ball.country} → *{r.special.name}*"
+                line = f"* {emoji} {r.ball.country}" if special else f"* {emoji} {r.ball.country} -> *{r.special.name}*"
                 if chunk_lines and len("\n".join(chunk_lines + [line])) > 800:
                     header = f"**Minimum: {amount}**" if chunk_num == 1 else "\u200b"
                     entries.append((header, "\n".join(chunk_lines)))
@@ -588,7 +571,7 @@ class CollectorCog(commands.Cog):
                 entries.append((header, "\n".join(chunk_lines)))
 
         source = FieldPageSource(entries, per_page=3, inline=False)
-        source.embed.title = f"{special.strip()} Collector List" if special else "Collector List"
+        source.embed.title = f'"{special.strip()}" Collector List' if special else "Collector List"
         source.embed.color = discord.Color.gold()
         pages = Pages(source, interaction=interaction)
         await pages.start(ephemeral=True)
