@@ -5,7 +5,7 @@ from django.utils.html import format_html
 from collector_admin.models import CollectorClaim, CollectorRequirement
 
 
-# ── Collector Claims inline (shown inside CollectorRequirement) ───────────────
+# ── Collector Claims inline ───────────────
 
 class CollectorClaimInline(admin.TabularInline):
     model = CollectorClaim
@@ -104,7 +104,6 @@ class CollectorClaimAdmin(admin.ModelAdmin):
 
     def get_fields(self, request, obj=None):
         if obj is None:
-
             return ("player", "requirement")
 
         return ("player", "ball_instance", "requirement", "claimed_at")
@@ -118,6 +117,7 @@ class CollectorClaimAdmin(admin.ModelAdmin):
         if not change:
 
             from bd_models.models import BallInstance
+            from django.utils import timezone
             req = obj.requirement
             ball_instance = BallInstance.objects.create(
                 player=obj.player,
@@ -125,6 +125,7 @@ class CollectorClaimAdmin(admin.ModelAdmin):
                 special=req.special,
                 attack_bonus=0,
                 health_bonus=0,
+                catch_date=timezone.now(),
             )
             obj.ball_instance = ball_instance
         super().save_model(request, obj, form, change)
