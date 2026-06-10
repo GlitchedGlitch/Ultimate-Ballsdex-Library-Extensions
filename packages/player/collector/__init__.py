@@ -1,9 +1,8 @@
 from typing import TYPE_CHECKING
-from .cog import CollectorAdminGroup, CollectorCog
+from .cog import CollectorAdminGroup, CollectorCog, _migrate_requirements
 
 if TYPE_CHECKING:
     from ballsdex.core.bot import BallsDexBot
-
 
 async def setup(bot: "BallsDexBot"):
     import discord
@@ -11,6 +10,11 @@ async def setup(bot: "BallsDexBot"):
     from ballsdex.settings import settings
 
     log = logging.getLogger("ballsdex.packages.collector")
+
+    try:
+        await _migrate_requirements()
+    except Exception:
+        log.warning("requirements.txt migration failed or skipped", exc_info=True)
 
     admin_cog = bot.get_cog("Admin")
     if admin_cog and admin_cog.__cog_app_commands_group__:
@@ -42,4 +46,3 @@ async def setup(bot: "BallsDexBot"):
         log.info("Command tree synced after collector setup")
     except Exception:
         log.warning("Failed to sync command tree after collector setup", exc_info=True)
-
