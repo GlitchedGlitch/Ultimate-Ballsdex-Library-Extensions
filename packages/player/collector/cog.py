@@ -12,14 +12,13 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from discord.ui import Modal, TextInput
-from tortoise import fields
-from tortoise.models import Model
 
 from ballsdex.core.models import BallInstance, Player, Special
 from ballsdex.core.models import balls as balls_cache
 from ballsdex.core.utils.logging import log_action
 from ballsdex.core.utils.paginator import FieldPageSource, Pages
 from ballsdex.core.utils.transformers import BallTransform, SpecialTransform
+from ballsdex.packages.collector.models import CollectorClaim, CollectorRequirement
 from ballsdex.settings import settings
 
 if TYPE_CHECKING:
@@ -29,33 +28,12 @@ log = logging.getLogger("ballsdex.packages.collector")
 
 GROUPS_PER_PAGE = 7
 
-# ── Tortoise models mirroring the Django tables ───────────────────────────────
-
-class CollectorRequirement(Model):
-    id = fields.IntField(pk=True)
-    ball = fields.ForeignKeyField("models.Ball", related_name="collector_requirements")
-    special = fields.ForeignKeyField("models.Special", related_name="collector_requirements")
-    amount = fields.IntField()
-
-    class Meta:
-        table = "collector_requirement"
-        app = "models" 
-
-class CollectorClaim(Model):
-    id = fields.IntField(pk=True)
-    player = fields.ForeignKeyField("models.Player", related_name="collector_claims")
-    ball_instance = fields.ForeignKeyField("models.BallInstance", related_name="collector_claim", unique=True)
-    requirement = fields.ForeignKeyField("models.CollectorRequirement", related_name="claims")
-    claimed_at = fields.DatetimeField(auto_now_add=True)
-
-    class Meta:
-        table = "collector_claim"
-        app = "models"
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
 async def _get_reqs(ball_id: int) -> list[CollectorRequirement]:
     return await CollectorRequirement.filter(ball_id=ball_id).prefetch_related("special").order_by("amount")
+
 
 async def _get_all_reqs(special_name: str | None = None) -> list[CollectorRequirement]:
     qs = CollectorRequirement.all().prefetch_related("ball", "special").order_by("ball__country", "amount")
@@ -63,6 +41,7 @@ async def _get_all_reqs(special_name: str | None = None) -> list[CollectorRequir
         reqs = await qs
         return [r for r in reqs if r.special.name.lower() == special_name.strip().lower()]
     return await qs
+
 
 async def _upsert_req(ball_id: int, special_id: int, amount: int) -> CollectorRequirement:
     req, _ = await CollectorRequirement.get_or_create(
@@ -74,11 +53,13 @@ async def _upsert_req(ball_id: int, special_id: int, amount: int) -> CollectorRe
         await req.save()
     return req
 
+
 async def _delete_req(ball_id: int, special_id: int | None = None):
     qs = CollectorRequirement.filter(ball_id=ball_id)
     if special_id:
         qs = qs.filter(special_id=special_id)
     await qs.delete()
+
 
 async def _has_claimed(user_id: int, ball_id: int, special_id: int) -> bool:
     req = await CollectorRequirement.get_or_none(ball_id=ball_id, special_id=special_id)
@@ -89,12 +70,14 @@ async def _has_claimed(user_id: int, ball_id: int, special_id: int) -> bool:
         requirement_id=req.pk,
     ).exists()
 
+
 async def _mark_claimed(player, ball_instance, req: CollectorRequirement):
     await CollectorClaim.create(
         player=player,
         ball_instance=ball_instance,
         requirement=req,
     )
+
 
 # ── Ball emoji helper ─────────────────────────────────────────────────────────
 
@@ -106,6 +89,7 @@ def _ball_emoji(bot: "BallsDexBot", ball_id: int) -> str:
             return str(emoji)
     return "•"
 
+
 def _find_ball_by_name(name: str):
     name = name.strip().lower()
     for ball in balls_cache.values():
@@ -113,12 +97,14 @@ def _find_ball_by_name(name: str):
             return ball
     return None
 
+
 async def _find_special_by_name(name: str):
     name_lower = name.strip().lower()
     for s in await Special.all():
         if s.name.lower() == name_lower:
             return s
     return None
+
 
 # ── Claim helpers ─────────────────────────────────────────────────────────────
 
@@ -160,6 +146,7 @@ async def _do_claim(
         ephemeral=True,
     )
 
+
 class ClaimSelectView(discord.ui.View):
     def __init__(self, bot, interaction, ball, player, eligible):
         super().__init__(timeout=60)
@@ -190,6 +177,7 @@ class ClaimSelectView(discord.ui.View):
             await self.original.edit_original_response(view=self)
         except Exception:
             pass
+
 
 # ── Bulk modal ────────────────────────────────────────────────────────────────
 
@@ -281,6 +269,7 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
                 f"Errors: {len(errors)}",
                 interaction.client,
             )
+
 
 # ── /admin collector ──────────────────────────────────────────────────────────
 
@@ -412,6 +401,7 @@ class CollectorAdminGroup(app_commands.Group):
             f"**Collector Requirements — {ball.country}**\n" + "\n".join(lines),
             ephemeral=True,
         )
+
 
 # ── Player-facing cog ─────────────────────────────────────────────────────────
 
