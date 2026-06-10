@@ -1,3 +1,4 @@
+from django import forms
 from django.contrib import admin
 from django.utils.html import format_html
 
@@ -62,7 +63,7 @@ class CollectorRequirementAdmin(admin.ModelAdmin):
 
 # ── CollectorClaim admin ──────────────────────────────────────────────────────
 
-class CollectorClaimAddForm(admin.ModelForm):
+class CollectorClaimAddForm(forms.ModelForm):
     """Custom form for adding CollectorClaim with dropdowns."""
 
     class Meta:
@@ -83,7 +84,6 @@ class CollectorClaimAdmin(admin.ModelAdmin):
     readonly_fields = ("ball_instance", "claimed_at")
     ordering = ("-claimed_at",)
 
-    # Use custom form for add, default for change
     form = CollectorClaimAddForm
     add_form = CollectorClaimAddForm
 
@@ -91,7 +91,7 @@ class CollectorClaimAdmin(admin.ModelAdmin):
         return True
 
     def has_change_permission(self, request, obj=None):
-        # Allow viewing but not editing existing claims
+
         return False
 
     def has_delete_permission(self, request, obj=None):
@@ -104,9 +104,9 @@ class CollectorClaimAdmin(admin.ModelAdmin):
 
     def get_fields(self, request, obj=None):
         if obj is None:
-            # Add form: only show player and requirement dropdowns
+
             return ("player", "requirement")
-        # Change form: show all readonly fields
+
         return ("player", "ball_instance", "requirement", "claimed_at")
 
     def get_readonly_fields(self, request, obj=None):
@@ -116,7 +116,7 @@ class CollectorClaimAdmin(admin.ModelAdmin):
 
     def save_model(self, request, obj, form, change):
         if not change:
-            # On add: create a BallInstance automatically
+
             from bd_models.models import BallInstance
             req = obj.requirement
             ball_instance = BallInstance.objects.create(
