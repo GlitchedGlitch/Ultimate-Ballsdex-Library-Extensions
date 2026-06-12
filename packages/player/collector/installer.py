@@ -89,15 +89,11 @@ def add_to_config():
 def _add_list_to_config(key: str, value: str):
     """
     Append a value to a YAML list in config.yml by text manipulation.
-    Handles ALL broken formats: empty, null, string, or missing.
+    Handles ALL broken formats including corruption from previous failed installs.
     Preserves comments, formatting, and order.
     """
     with open(CONFIG, "r") as f:
         lines = f.readlines()
-
-    # Check if value already exists anywhere in file
-    if any(value.strip() in l for l in lines):
-        return
 
     # Find the key line
     key_line = None
@@ -119,23 +115,42 @@ def _add_list_to_config(key: str, value: str):
             f.writelines(lines)
         return
 
+    # Check if value already exists in a list item UNDER THIS KEY
+    value_exists = False
+    for i in range(key_line + 1, len(lines)):
+        line = lines[i]
+        if line.strip().startswith("-"):
+            if value.strip() in line:
+                value_exists = True
+                break
+        elif line.strip() and not line.strip().startswith("#"):
+            # End of list or new key reached
+            break
+
+    # Check if key line is CORRUPTED (has value on same line, e.g., "key: null")
     key_content = lines[key_line].strip()
     if key_content != key + ":":
+        # Corrupted key line — extract old value and rebuild
         old_value = key_content[len(key) + 1:].strip()
-        # Remove quotes and 'null' keyword
         old_value = old_value.strip('"').strip("'")
-        if old_value.lower() in ("null", "none", "~"):
+        if old_value.lower() in ("null", "none", "~", ""):
             old_value = ""
+
         new_lines = [f"{key}:\n"]
-        if old_value:
+        if old_value and not value_exists:
             new_lines.append(f"  - {old_value}\n")
-        new_lines.append(f"  - {value}\n")
+        if not value_exists:
+            new_lines.append(f"  - {value}\n")
         lines = lines[:key_line] + new_lines + lines[key_line + 1:]
         with open(CONFIG, "w") as f:
             f.writelines(lines)
         return
 
-    # Case 2: Value is on SUBSEQUENT lines
+    # Key line is clean (just "key:"), check if we need to add value
+    if value_exists:
+        return
+
+    # Add value to the list under this key
     next_idx = key_line + 1
 
     # If key is at end of file, just append
@@ -148,8 +163,10 @@ def _add_list_to_config(key: str, value: str):
     next_line = lines[next_idx]
     next_stripped = next_line.strip()
 
+    # Check if next line is a NEW TOP-LEVEL KEY (not indented, contains ':')
+    # This means the current key has NO value (empty/null)
     if next_stripped and not next_line.startswith(" ") and not next_line.startswith("\t") and ":" in next_stripped:
-        
+        # Empty key — insert our list item before the next key
         lines.insert(next_idx, f"  - {value}\n")
         with open(CONFIG, "w") as f:
             f.writelines(lines)
