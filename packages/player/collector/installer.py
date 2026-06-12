@@ -89,48 +89,107 @@ def add_to_config():
 def _add_list_to_config(key: str, value: str):
     """
     Append a value to a YAML list in config.yml by text manipulation.
+    Handles ALL broken formats: empty, null, string, or missing.
     Preserves comments, formatting, and order.
     """
     with open(CONFIG, "r") as f:
         lines = f.readlines()
 
-    # Check if value already exists
+    # Check if value already exists anywhere in file
     if any(value.strip() in l for l in lines):
         return
 
-    # Find the key (e.g., "extra-tortoise-models:")
+    # Find the key line
     key_line = None
     for i, line in enumerate(lines):
-        if line.strip().startswith(key + ":"):
+        stripped = line.strip()
+        if stripped.startswith(key + ":"):
             key_line = i
             break
 
     if key_line is None:
-        # Key doesn't exist, append at end of file
-        lines.append("\n")
+        # Key doesn't exist at all — append at end as proper list
+        if lines and not lines[-1].endswith("\n"):
+            lines.append("\n")
+        if lines and lines[-1].strip():
+            lines.append("\n")
         lines.append(f"{key}:\n")
         lines.append(f"  - {value}\n")
-    else:
-        # Key exists, find the last item in the list and insert after
+        with open(CONFIG, "w") as f:
+            f.writelines(lines)
+        return
+
+    key_content = lines[key_line].strip()
+    if key_content != key + ":":
+        old_value = key_content[len(key) + 1:].strip()
+        # Remove quotes and 'null' keyword
+        old_value = old_value.strip('"').strip("'")
+        if old_value.lower() in ("null", "none", "~"):
+            old_value = ""
+        new_lines = [f"{key}:\n"]
+        if old_value:
+            new_lines.append(f"  - {old_value}\n")
+        new_lines.append(f"  - {value}\n")
+        lines = lines[:key_line] + new_lines + lines[key_line + 1:]
+        with open(CONFIG, "w") as f:
+            f.writelines(lines)
+        return
+
+    # Case 2: Value is on SUBSEQUENT lines
+    next_idx = key_line + 1
+
+    # If key is at end of file, just append
+    if next_idx >= len(lines):
+        lines.append(f"  - {value}\n")
+        with open(CONFIG, "w") as f:
+            f.writelines(lines)
+        return
+
+    next_line = lines[next_idx]
+    next_stripped = next_line.strip()
+
+    if next_stripped and not next_line.startswith(" ") and not next_line.startswith("\t") and ":" in next_stripped:
+        
+        lines.insert(next_idx, f"  - {value}\n")
+        with open(CONFIG, "w") as f:
+            f.writelines(lines)
+        return
+
+    # Check if it's already a proper list
+    if next_stripped.startswith("-"):
         insert_after = key_line
         for i in range(key_line + 1, len(lines)):
-            line = lines[i]
-            # Check if this is a list item (starts with "  - ")
-            if line.strip().startswith("-"):
+            if lines[i].strip().startswith("-"):
                 insert_after = i
-            # If we hit a non-list, non-empty, non-comment line, the list ended
-            elif line.strip() and not line.strip().startswith("#"):
+            elif lines[i].strip() and not lines[i].strip().startswith("#"):
                 break
         lines.insert(insert_after + 1, f"  - {value}\n")
+        with open(CONFIG, "w") as f:
+            f.writelines(lines)
+        return
+
+    # Empty line or comment — insert as first list item
+    if not next_stripped or next_stripped.startswith("#"):
+        lines.insert(next_idx, f"  - {value}\n")
+        with open(CONFIG, "w") as f:
+            f.writelines(lines)
+        return
+
+    # String value on next line — convert to list
+    old_value = next_stripped.strip('"').strip("'")
+    if old_value.lower() in ("null", "none", "~"):
+        old_value = ""
+    new_lines = [f"{key}:\n"]
+    if old_value:
+        new_lines.append(f"  - {old_value}\n")
+    new_lines.append(f"  - {value}\n")
+    lines = lines[:key_line] + new_lines + lines[next_idx + 1:]
 
     with open(CONFIG, "w") as f:
         f.writelines(lines)
 
 def _remove_from_config_list(key: str, value: str):
-    """
-    Remove a value from a YAML list in config.yml by text manipulation.
-    Preserves comments, formatting, and order.
-    """
+    """Remove a value from a YAML list in config.yml by text manipulation."""
     with open(CONFIG, "r") as f:
         lines = f.readlines()
 
