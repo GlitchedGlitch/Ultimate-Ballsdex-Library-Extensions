@@ -461,12 +461,12 @@ class CollectorCog(commands.GroupCog, name="collector"):
             await interaction.followup.send(msg, ephemeral=True)
             return
 
-        # Group by amount
+        
         grouped: dict[int, list[CollectorRequirement]] = defaultdict(list)
         for r in all_reqs:
             grouped[r.amount].append(r)
 
-        # Build embed field entries — (name, value) pairs for paginator
+        
         entries: list[tuple[str, str]] = []
         for amount in grouped:
             chunk_lines: list[str] = []
@@ -488,7 +488,7 @@ class CollectorCog(commands.GroupCog, name="collector"):
                 header = f"**Minimum: {amount:,}**" if chunk_num == 1 else "\u200b"
                 entries.append((header, "\n".join(chunk_lines)))
 
-        # Simple embed pagination (no FieldPageSource dependency)
+        
         pages: list[discord.Embed] = []
         FIELDS_PER_PAGE = 3
         title = f'"{special.strip()}" Collector List' if special else "Collector List"
