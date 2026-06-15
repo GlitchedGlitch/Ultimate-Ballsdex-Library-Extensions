@@ -14,12 +14,9 @@ async def setup(bot: "BallsDexBot") -> None:
     await bot.add_cog(CollectorCog(bot))
     log.info("CollectorCog loaded")
 
-    # The Admin cog exposes its group as self.admin (a hybrid_group).
-    # We attach to its app_command so /admin collector appears as a subgroup.
     admin_cog = bot.cogs.get("Admin")
     if admin_cog is not None and hasattr(admin_cog, "admin"):
         try:
-            # Remove stale registration on hot-reload
             existing = admin_cog.admin.app_command.get_command("collector")
             if existing is not None:
                 admin_cog.admin.app_command.remove_command("collector")
