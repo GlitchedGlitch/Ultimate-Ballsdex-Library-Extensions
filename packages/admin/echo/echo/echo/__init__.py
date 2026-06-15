@@ -35,7 +35,7 @@ async def setup(bot: "BallsDexBot") -> None:
     admin_cog = bot.cogs.get("Admin")
     if admin_cog is not None and hasattr(admin_cog, "admin"):
         try:
-            # Remove any stale echo command (handles renames on reload)
+            
             for cmd in list(admin_cog.admin.app_command.commands):
                 if isinstance(cmd, admin_cog.admin.app_command.__class__.__mro__[0]) or True:
                     if getattr(cmd, "_is_echo", False):
