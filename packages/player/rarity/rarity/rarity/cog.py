@@ -66,7 +66,7 @@ class RarityItemFormatter(ItemFormatter):
         for section in page:
             self.item.add_item(section)
 
-        # Footer before buttons
+        # Footer before buttons or somethinv
         if self.footer and self.menu.source.get_max_pages() > 1:
             self.item.add_item(
                 discord.ui.TextDisplay(
@@ -74,7 +74,7 @@ class RarityItemFormatter(ItemFormatter):
                 )
             )
 
-        # Buttons ALWAYS LAST
+        # Buttons at the end of the page (i suffered much trying to fix this)
         for row in button_rows:
             self.item.add_item(row)
 
@@ -147,7 +147,7 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
 
         # ── Search mode ───────────────────────────────────────────────────────
         if search:
-            # Try rarity value first
+            
             try:
                 rarity_value = float(search.replace(",", "."))
                 matches = [b for b in all_balls if float(b.rarity) == rarity_value]
@@ -165,8 +165,7 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
                 return
             except ValueError:
                 pass
-
-            # Try exact then partial ball name
+                
             match = next((b for b in all_balls if b.country.lower() == search.lower()), None)
             if not match:
                 match = next((b for b in all_balls if search.lower() in b.country.lower()), None)
@@ -194,7 +193,7 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
 
         sorted_rarities = sorted(rarity_map.keys(), reverse=reverse)
 
-        # Build one TextDisplay per rarity group, then chunk into pages
+        # Build one textdisplay per rarity group, tgen chunk into pages
         all_items: list[discord.ui.Item] = []
         for r in sorted_rarities:
             group_balls = rarity_map[r]
@@ -220,7 +219,7 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
         view = RarityView(interaction.user.id)
         container = discord.ui.Container()
 
-        # Title section — always visible, position 0
+        # Title section, very big title trust
         container.add_item(discord.ui.TextDisplay(f"# {plural} Rarity List"))
         container.add_item(discord.ui.Separator())
 
