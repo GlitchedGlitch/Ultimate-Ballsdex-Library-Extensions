@@ -7,6 +7,7 @@ name = "Echo"
 version = "1.0.0"
 description = "Admin echo package for BallsDex v3. Make the bot talk and speak with a lot of custom features :3"
 license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Glitch" }]
 readme = "README.md"
 dependencies = []
