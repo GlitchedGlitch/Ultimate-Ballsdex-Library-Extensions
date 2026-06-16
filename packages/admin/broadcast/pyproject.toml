@@ -7,6 +7,7 @@ name = "Broadcast"
 version = "1.0.0"
 description = "Admin broadcast package for BallsDex v3. Send a message across all configured server :3"
 license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Glitch" }]
 readme = "README.md"
 dependencies = []
