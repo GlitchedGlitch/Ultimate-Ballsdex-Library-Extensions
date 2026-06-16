@@ -7,6 +7,7 @@ name = "Leave"
 version = "1.0.0"
 description = "Admin leave server package for BallsDex v3. Allows admins to make the bot leave a specific server in just a few seconds :3"
 license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Glitch" }]
 readme = "README.md"
 dependencies = []
