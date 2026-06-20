@@ -233,7 +233,7 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
 
             container.accent_color = line_color
 
-        title_text = f"**{plural} Rarity List**" if use_embed_style else f"# {plural} Rarity List"
+        title_text = f"## **{plural} Rarity List**" if use_embed_style else f"# {plural} Rarity List"
         container.add_item(discord.ui.TextDisplay(title_text))
         container.add_item(discord.ui.Separator())
 
