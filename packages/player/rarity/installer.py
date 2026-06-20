@@ -209,7 +209,7 @@ def build_settings_embed() -> discord.Embed:
     color_display = f"#{s['embed_color']}" if s["embed_color"] else "*(none set)*"
     style_display = "Container (Components V2)" if s["style"] == "container" else "Embed"
     if s["style"] == "embed":
-        buttons_display = "N/A — Discord has no \"inside an embed\" position for buttons"
+        buttons_display = "N/A - available only for **container** style"
     else:
         buttons_display = "Inside the message" if s["buttons_inside"] == "true" else "Outside the message"
     e = discord.Embed(
