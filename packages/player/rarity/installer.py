@@ -206,20 +206,17 @@ def build_result_embed(title: str, description: str, color: discord.Color) -> di
 
 def build_settings_embed() -> discord.Embed:
     s = _load_settings()
-    color_display = f"#{s['embed_color']}" if s["embed_color"] else "*(default — disabled)*"
+    color_display = f"#{s['embed_color']}" if s["embed_color"] else "*(none set)*"
     style_display = "Container (Components V2)" if s["style"] == "container" else "Embed"
     buttons_display = "Inside the message" if s["buttons_inside"] == "true" else "Outside the message"
     e = discord.Embed(
         title="Rarity Package Settings",
-        description=(
-            "Configure how the `/{group} rarity` command appears.\n\n"
-            f"**Line color:** {color_display}\n"
-            f"**Display style:** {style_display}\n"
-            f"**Navigation buttons:** {buttons_display}\n\n"
-            "Use the buttons below to change these settings."
-        ),
+        description="Configure how the `/{group} rarity` command appears.",
         color=_hex_to_color(s["embed_color"]) or discord.Color.blurple(),
     )
+    e.add_field(name="Line Color", value=color_display, inline=False)
+    e.add_field(name="Display Style", value=style_display, inline=False)
+    e.add_field(name="Navigation Buttons", value=buttons_display, inline=False)
     e.set_footer(text=FOOTER)
     return e
 
@@ -265,20 +262,6 @@ class SettingsView(View):
         color_enabled = bool(s["embed_color"])
         is_container = s["style"] == "container"
         buttons_inside = s["buttons_inside"] == "true"
-
-        enable_btn = Button(
-            label="Color: Enabled", style=discord.ButtonStyle.success, row=0,
-            disabled=color_enabled,
-        )
-        enable_btn.callback = self._enable_color
-        self.add_item(enable_btn)
-
-        disable_btn = Button(
-            label="Color: Disabled", style=discord.ButtonStyle.secondary, row=0,
-            disabled=not color_enabled,
-        )
-        disable_btn.callback = self._disable_color
-        self.add_item(disable_btn)
 
         change_btn = Button(label="Change Color", style=discord.ButtonStyle.primary, row=0)
         change_btn.callback = self._change_color
@@ -340,23 +323,6 @@ class SettingsView(View):
             pass
 
     # ── Color callbacks ───────────────────────────────────────────────────────
-
-    async def _enable_color(self, interaction: discord.Interaction):
-
-        s = _load_settings()
-        if not s["embed_color"]:
-            await interaction.response.send_modal(ColorChangeModal(self))
-            return
-        await interaction.response.defer()
-        self._refresh_buttons()
-        await self.message.edit(embed=build_settings_embed(), view=self)
-
-    async def _disable_color(self, interaction: discord.Interaction):
-
-        _save_settings({"embed_color": ""})
-        await interaction.response.defer()
-        self._refresh_buttons()
-        await self.message.edit(embed=build_settings_embed(), view=self)
 
     async def _change_color(self, interaction: discord.Interaction):
         await interaction.response.send_modal(ColorChangeModal(self))
