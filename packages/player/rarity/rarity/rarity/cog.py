@@ -85,6 +85,7 @@ class RarityItemFormatter(ItemFormatter):
                 )
             )
 
+        # Buttons at the end of the page (i suffered much trying to fix this)
         for row in button_rows:
             self.item.add_item(row)
 
@@ -107,7 +108,7 @@ class RarityView(LayoutView):
 
 
 class QuitButtonRow(ActionRow):
-    """Quit button row."""
+    """Quit button row"""
 
     def __init__(self, rarity_view: RarityView):
         super().__init__()
@@ -122,9 +123,35 @@ class QuitButtonRow(ActionRow):
         await interaction.edit_original_response(view=self.rarity_view)
 
 
+class GoToPageModal(discord.ui.Modal, title="Go to page"):
+    page = discord.ui.TextInput(label="Page", placeholder="Enter a number", min_length=1)
+
+    def __init__(self, paginator: "EmbedPaginatorView"):
+        super().__init__()
+        self.paginator = paginator
+        as_string = str(len(paginator.pages))
+        self.page.placeholder = f"Enter a number between 1 and {as_string}"
+        self.page.max_length = len(as_string)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            page = int(self.page.value)
+        except ValueError:
+            await interaction.response.send_message("Expected a number", ephemeral=True)
+            return
+        if page < 1:
+            await interaction.response.send_message("Minimum value is 1", ephemeral=True)
+        elif page > len(self.paginator.pages):
+            await interaction.response.send_message(
+                f"Maximum value is {len(self.paginator.pages)}", ephemeral=True
+            )
+        else:
+            await self.paginator.show_page(interaction, page - 1)
+
+
 class EmbedPaginatorView(discord.ui.View):
     """
-something
+    buttons like v2 but v3 buttons so v2 v3 yes
     """
 
     def __init__(
@@ -138,7 +165,7 @@ something
         super().__init__(timeout=timeout)
         self.user_id = user_id
         self.pages = pages
-        self.page = 0
+        self.current_page = 0
         self.buttons_inside = buttons_inside
         self._build()
 
@@ -147,20 +174,55 @@ something
         multi_page = len(self.pages) > 1
 
         if multi_page:
-            prev_btn = Button(label="◀ Back", style=discord.ButtonStyle.secondary, disabled=self.page == 0)
-            prev_btn.callback = self._prev
-            self.add_item(prev_btn)
+            self.first_btn = Button(label="≪", style=discord.ButtonStyle.grey)
+            self.first_btn.callback = self._go_first
+            self.add_item(self.first_btn)
 
-            next_btn = Button(
-                label="Next ▶", style=discord.ButtonStyle.secondary,
-                disabled=self.page >= len(self.pages) - 1,
+            self.prev_btn = Button(label="Back", style=discord.ButtonStyle.blurple)
+            self.prev_btn.callback = self._go_prev
+            self.add_item(self.prev_btn)
+
+            self.goto_btn = Button(
+                label=f"{self.current_page + 1} (go to)", style=discord.ButtonStyle.blurple
             )
-            next_btn.callback = self._next
-            self.add_item(next_btn)
+            self.goto_btn.callback = self._go_to
+            self.add_item(self.goto_btn)
+
+            self.next_btn = Button(label="Next", style=discord.ButtonStyle.blurple)
+            self.next_btn.callback = self._go_next
+            self.add_item(self.next_btn)
+
+            self.last_btn = Button(label="≫", style=discord.ButtonStyle.grey)
+            self.last_btn.callback = self._go_last
+            self.add_item(self.last_btn)
+
+            self._edit_buttons()
 
         quit_btn = Button(label="Quit", style=discord.ButtonStyle.danger)
         quit_btn.callback = self._quit
         self.add_item(quit_btn)
+
+    def _edit_buttons(self):
+        max_page = len(self.pages)
+        self.goto_btn.label = f"{self.current_page + 1} (go to)"
+
+        if self.current_page > 0:
+            self.prev_btn.label = str(self.current_page)
+            self.prev_btn.disabled = False
+            self.first_btn.disabled = False
+        else:
+            self.prev_btn.label = "Back"
+            self.prev_btn.disabled = True
+            self.first_btn.disabled = True
+
+        if self.current_page < max_page - 1:
+            self.next_btn.label = str(self.current_page + 2)
+            self.next_btn.disabled = False
+            self.last_btn.disabled = False
+        else:
+            self.next_btn.label = "Next"
+            self.next_btn.disabled = True
+            self.last_btn.disabled = True
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user_id:
@@ -170,15 +232,28 @@ something
             return False
         return True
 
-    async def _prev(self, interaction: discord.Interaction):
-        self.page -= 1
-        self._build()
-        await interaction.response.edit_message(embed=self.pages[self.page], view=self)
+    async def show_page(self, interaction: discord.Interaction, page: int):
+        self.current_page = page
+        self._edit_buttons()
+        if interaction.response.is_done():
+            await interaction.edit_original_response(embed=self.pages[page], view=self)
+        else:
+            await interaction.response.edit_message(embed=self.pages[page], view=self)
 
-    async def _next(self, interaction: discord.Interaction):
-        self.page += 1
-        self._build()
-        await interaction.response.edit_message(embed=self.pages[self.page], view=self)
+    async def _go_first(self, interaction: discord.Interaction):
+        await self.show_page(interaction, 0)
+
+    async def _go_prev(self, interaction: discord.Interaction):
+        await self.show_page(interaction, self.current_page - 1)
+
+    async def _go_to(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(GoToPageModal(self))
+
+    async def _go_next(self, interaction: discord.Interaction):
+        await self.show_page(interaction, self.current_page + 1)
+
+    async def _go_last(self, interaction: discord.Interaction):
+        await self.show_page(interaction, len(self.pages) - 1)
 
     async def _quit(self, interaction: discord.Interaction):
         for child in self.children:
@@ -193,8 +268,8 @@ something
 
 def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
     """
-    Build the rarity command as a standalone Command to attach to the Balls group.
-    Mirrors the v2 factory pattern so __init__.py can attach it the same way.
+    Build the rarity command as a standalone Command to attach to the Balls group
+    Mirrors the v2 factory pattern so __init__.py can attach it the same way
     """
 
     @app_commands.command(
@@ -261,6 +336,7 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
                 ephemeral=True,
             )
             return
+
         await interaction.response.defer(ephemeral=ephemeral)
 
         rarity_map: dict[float, list[Ball]] = defaultdict(list)
@@ -331,13 +407,13 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
         view = RarityView(interaction.user.id)
         container = discord.ui.Container()
         if line_color is not None:
- 
+
             container.accent_color = line_color
 
         title_text = f"# {plural} Rarity List"
         container.add_item(discord.ui.TextDisplay(title_text))
         container.add_item(discord.ui.Separator())
-        header_item_count = 2  
+        header_item_count = 2 
 
         view.add_item(container)
 
