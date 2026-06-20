@@ -208,7 +208,10 @@ def build_settings_embed() -> discord.Embed:
     s = _load_settings()
     color_display = f"#{s['embed_color']}" if s["embed_color"] else "*(none set)*"
     style_display = "Container (Components V2)" if s["style"] == "container" else "Embed"
-    buttons_display = "Inside the message" if s["buttons_inside"] == "true" else "Outside the message"
+    if s["style"] == "embed":
+        buttons_display = "N/A — Discord has no \"inside an embed\" position for buttons"
+    else:
+        buttons_display = "Inside the message" if s["buttons_inside"] == "true" else "Outside the message"
     e = discord.Embed(
         title="Rarity Package Settings",
         description="Configure how the `/{group} rarity` command appears.",
@@ -219,9 +222,6 @@ def build_settings_embed() -> discord.Embed:
     e.add_field(name="Navigation Buttons", value=buttons_display, inline=False)
     e.set_footer(text=FOOTER)
     return e
-
-
-# ── Settings panel view ───────────────────────────────────────────────────────
 
 class ColorChangeModal(Modal, title="Set Embed Line Color"):
     color_input = TextInput(
@@ -290,14 +290,14 @@ class SettingsView(View):
 
         inside_btn = Button(
             label="Buttons: Inside", style=discord.ButtonStyle.success, row=2,
-            disabled=buttons_inside,
+            disabled=(not is_container) or buttons_inside,
         )
         inside_btn.callback = self._buttons_inside
         self.add_item(inside_btn)
 
         outside_btn = Button(
             label="Buttons: Outside", style=discord.ButtonStyle.secondary, row=2,
-            disabled=not buttons_inside,
+            disabled=(not is_container) or (not buttons_inside),
         )
         outside_btn.callback = self._buttons_outside
         self.add_item(outside_btn)
@@ -322,8 +322,6 @@ class SettingsView(View):
         except Exception:
             pass
 
-    # ── Color callbacks ───────────────────────────────────────────────────────
-
     async def _change_color(self, interaction: discord.Interaction):
         await interaction.response.send_modal(ColorChangeModal(self))
 
@@ -332,8 +330,6 @@ class SettingsView(View):
         await interaction.response.defer()
         self._refresh_buttons()
         await self.message.edit(embed=build_settings_embed(), view=self)
-
-    # ── Style callbacks ───────────────────────────────────────────────────────
 
     async def _set_container(self, interaction: discord.Interaction):
         _save_settings({"style": "container"})
@@ -347,8 +343,6 @@ class SettingsView(View):
         self._refresh_buttons()
         await self.message.edit(embed=build_settings_embed(), view=self)
 
-    # ── Button placement callbacks ────────────────────────────────────────────
-
     async def _buttons_inside(self, interaction: discord.Interaction):
         _save_settings({"buttons_inside": "true"})
         await interaction.response.defer()
@@ -361,15 +355,10 @@ class SettingsView(View):
         self._refresh_buttons()
         await self.message.edit(embed=build_settings_embed(), view=self)
 
-    # ── Back ──────────────────────────────────────────────────────────────────
-
     async def _back(self, interaction: discord.Interaction):
         await interaction.response.defer()
         color = discord.Color.gold() if self.parent.installed else discord.Color.greyple()
         await self.message.edit(embed=build_main_embed(self.parent.installed, color), view=self.parent)
-
-
-# ── Warning gate ──────────────────────────────────────────────────────────────
 
 class InstallWarningView(View):
     def __init__(self, parent: "RarityInstallerView"):
