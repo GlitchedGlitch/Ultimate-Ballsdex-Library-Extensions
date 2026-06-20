@@ -3,7 +3,7 @@ Rarity Package Installer v3
 """
 
 import io, os, re, traceback, discord
-from discord.ui import View, Button
+from discord.ui import View, Button, Modal, TextInput
 
 REPO        = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
 BRANCH      = "v3"
@@ -23,6 +23,39 @@ EXTRA_TOML = "/code/admin_panel/config/extra.toml"
 FOOTER         = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
 FOOTER_TIMEOUT = FOOTER + " • Timed out"
 BAR_FILLED, BAR_EMPTY, BAR_LEN = "█", "░", 10
+
+SETTINGS_FILE = "/code/admin_panel/config/rarity_settings.txt"
+SETTINGS_DEFAULTS = {
+    "embed_color": "",
+    "style": "container",
+    "buttons_inside": "true",
+}
+
+
+def _load_settings() -> dict[str, str]:
+    data = dict(SETTINGS_DEFAULTS)
+    try:
+        with open(SETTINGS_FILE) as f:
+            for line in f:
+                line = line.strip()
+                if not line or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                if key in SETTINGS_DEFAULTS:
+                    data[key] = value.strip()
+    except FileNotFoundError:
+        pass
+    return data
+
+
+def _save_settings(data: dict[str, str]) -> None:
+    merged = _load_settings()
+    merged.update(data)
+    os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
+    with open(SETTINGS_FILE, "w") as f:
+        for key, value in merged.items():
+            f.write(f"{key}={value}\n")
 
 
 # ── extra.toml helpers ────────────────────────────────────────────────────────
@@ -82,6 +115,16 @@ def _progress_embed(title: str, steps: list, color: discord.Color) -> discord.Em
     e = discord.Embed(title=title, description="\n".join(lines) + f"\n\n{_bar(done, len(steps))}", color=color)
     e.set_footer(text=FOOTER)
     return e
+
+
+def _hex_to_color(hex_str: str) -> discord.Color | None:
+    hex_str = hex_str.strip().lstrip("#")
+    if not hex_str:
+        return None
+    try:
+        return discord.Color(int(hex_str, 16))
+    except ValueError:
+        return None
 
 
 # ── Embeds ────────────────────────────────────────────────────────────────────
@@ -159,6 +202,205 @@ def build_result_embed(title: str, description: str, color: discord.Color) -> di
     e = discord.Embed(title=title, description=description, color=color)
     e.set_footer(text=FOOTER)
     return e
+
+
+def build_settings_embed() -> discord.Embed:
+    s = _load_settings()
+    color_display = f"#{s['embed_color']}" if s["embed_color"] else "*(default — disabled)*"
+    style_display = "Container (Components V2)" if s["style"] == "container" else "Embed"
+    buttons_display = "Inside the message" if s["buttons_inside"] == "true" else "Outside the message"
+    e = discord.Embed(
+        title="Rarity Package Settings",
+        description=(
+            "Configure how the `/{group} rarity` command appears.\n\n"
+            f"**Line color:** {color_display}\n"
+            f"**Display style:** {style_display}\n"
+            f"**Navigation buttons:** {buttons_display}\n\n"
+            "Use the buttons below to change these settings."
+        ),
+        color=_hex_to_color(s["embed_color"]) or discord.Color.blurple(),
+    )
+    e.set_footer(text=FOOTER)
+    return e
+
+
+# ── Settings panel view ───────────────────────────────────────────────────────
+
+class ColorChangeModal(Modal, title="Set Embed Line Color"):
+    color_input = TextInput(
+        label="Hex color",
+        placeholder="e.g. ff0000 for red",
+        min_length=6,
+        max_length=6,
+        required=True,
+    )
+
+    def __init__(self, parent: "SettingsView"):
+        super().__init__()
+        self.parent = parent
+
+    async def on_submit(self, interaction: discord.Interaction):
+        raw = self.color_input.value.strip().lstrip("#")
+        if _hex_to_color(raw) is None:
+            await interaction.response.send_message(
+                "Invalid hex color. Use 6 hex digits, e.g. `ff0000`.", ephemeral=True
+            )
+            return
+        _save_settings({"embed_color": raw})
+        await interaction.response.defer()
+        self.parent._refresh_buttons()
+        await self.parent.message.edit(embed=build_settings_embed(), view=self.parent)
+
+
+class SettingsView(View):
+    def __init__(self, parent: "RarityInstallerView"):
+        super().__init__(timeout=180)
+        self.parent = parent
+        self.message = parent.message
+        self._build()
+
+    def _build(self):
+        self.clear_items()
+        s = _load_settings()
+        color_enabled = bool(s["embed_color"])
+        is_container = s["style"] == "container"
+        buttons_inside = s["buttons_inside"] == "true"
+
+        enable_btn = Button(
+            label="Color: Enabled", style=discord.ButtonStyle.success, row=0,
+            disabled=color_enabled,
+        )
+        enable_btn.callback = self._enable_color
+        self.add_item(enable_btn)
+
+        disable_btn = Button(
+            label="Color: Disabled", style=discord.ButtonStyle.secondary, row=0,
+            disabled=not color_enabled,
+        )
+        disable_btn.callback = self._disable_color
+        self.add_item(disable_btn)
+
+        change_btn = Button(label="Change Color", style=discord.ButtonStyle.primary, row=0)
+        change_btn.callback = self._change_color
+        self.add_item(change_btn)
+
+        remove_btn = Button(
+            label="Remove Color", style=discord.ButtonStyle.danger, row=0,
+            disabled=not color_enabled,
+        )
+        remove_btn.callback = self._remove_color
+        self.add_item(remove_btn)
+
+        container_btn = Button(
+            label="Style: Container", style=discord.ButtonStyle.success, row=1,
+            disabled=is_container,
+        )
+        container_btn.callback = self._set_container
+        self.add_item(container_btn)
+
+        embed_btn = Button(
+            label="Style: Embed", style=discord.ButtonStyle.secondary, row=1,
+            disabled=not is_container,
+        )
+        embed_btn.callback = self._set_embed
+        self.add_item(embed_btn)
+
+        inside_btn = Button(
+            label="Buttons: Inside", style=discord.ButtonStyle.success, row=2,
+            disabled=buttons_inside,
+        )
+        inside_btn.callback = self._buttons_inside
+        self.add_item(inside_btn)
+
+        outside_btn = Button(
+            label="Buttons: Outside", style=discord.ButtonStyle.secondary, row=2,
+            disabled=not buttons_inside,
+        )
+        outside_btn.callback = self._buttons_outside
+        self.add_item(outside_btn)
+
+        back_btn = Button(label="Back", style=discord.ButtonStyle.secondary, emoji="↩️", row=3)
+        back_btn.callback = self._back
+        self.add_item(back_btn)
+
+    def _refresh_buttons(self):
+        self._build()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.parent.ctx.author.id:
+            await interaction.response.send_message("This menu is not for you.", ephemeral=True)
+            return False
+        return True
+
+    async def on_timeout(self):
+        color = discord.Color.gold() if self.parent.installed else discord.Color.greyple()
+        try:
+            await self.message.edit(embed=build_main_embed(self.parent.installed, color), view=self.parent)
+        except Exception:
+            pass
+
+    # ── Color callbacks ───────────────────────────────────────────────────────
+
+    async def _enable_color(self, interaction: discord.Interaction):
+
+        s = _load_settings()
+        if not s["embed_color"]:
+            await interaction.response.send_modal(ColorChangeModal(self))
+            return
+        await interaction.response.defer()
+        self._refresh_buttons()
+        await self.message.edit(embed=build_settings_embed(), view=self)
+
+    async def _disable_color(self, interaction: discord.Interaction):
+
+        _save_settings({"embed_color": ""})
+        await interaction.response.defer()
+        self._refresh_buttons()
+        await self.message.edit(embed=build_settings_embed(), view=self)
+
+    async def _change_color(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(ColorChangeModal(self))
+
+    async def _remove_color(self, interaction: discord.Interaction):
+        _save_settings({"embed_color": ""})
+        await interaction.response.defer()
+        self._refresh_buttons()
+        await self.message.edit(embed=build_settings_embed(), view=self)
+
+    # ── Style callbacks ───────────────────────────────────────────────────────
+
+    async def _set_container(self, interaction: discord.Interaction):
+        _save_settings({"style": "container"})
+        await interaction.response.defer()
+        self._refresh_buttons()
+        await self.message.edit(embed=build_settings_embed(), view=self)
+
+    async def _set_embed(self, interaction: discord.Interaction):
+        _save_settings({"style": "embed"})
+        await interaction.response.defer()
+        self._refresh_buttons()
+        await self.message.edit(embed=build_settings_embed(), view=self)
+
+    # ── Button placement callbacks ────────────────────────────────────────────
+
+    async def _buttons_inside(self, interaction: discord.Interaction):
+        _save_settings({"buttons_inside": "true"})
+        await interaction.response.defer()
+        self._refresh_buttons()
+        await self.message.edit(embed=build_settings_embed(), view=self)
+
+    async def _buttons_outside(self, interaction: discord.Interaction):
+        _save_settings({"buttons_inside": "false"})
+        await interaction.response.defer()
+        self._refresh_buttons()
+        await self.message.edit(embed=build_settings_embed(), view=self)
+
+    # ── Back ──────────────────────────────────────────────────────────────────
+
+    async def _back(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        color = discord.Color.gold() if self.parent.installed else discord.Color.greyple()
+        await self.message.edit(embed=build_main_embed(self.parent.installed, color), view=self.parent)
 
 
 # ── Warning gate ──────────────────────────────────────────────────────────────
@@ -343,6 +585,13 @@ class RarityInstallerView(View):
     async def install_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
         await self.message.edit(embed=build_warning_embed(), view=InstallWarningView(self))
+
+    @discord.ui.button(label="Settings", style=discord.ButtonStyle.secondary, emoji="⚙️")
+    async def settings_button(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        settings_view = SettingsView(self)
+        settings_view.message = self.message
+        await self.message.edit(embed=build_settings_embed(), view=settings_view)
 
     @discord.ui.button(label="Remove", style=discord.ButtonStyle.danger, emoji="🗑️")
     async def remove_button(self, interaction: discord.Interaction, button: Button):
