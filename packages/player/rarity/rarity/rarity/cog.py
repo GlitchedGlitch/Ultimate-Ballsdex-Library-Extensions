@@ -27,7 +27,6 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("ballsdex.packages.rarity")
 
-# How many rarity groups to show per page
 GROUPS_PER_PAGE = 7
 
 
@@ -234,13 +233,8 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
 
             container.accent_color = line_color
 
-        # Title section
-        title_text = f"# {plural} Rarity List"
-        if use_embed_style:
-
-            container.add_item(discord.ui.TextDisplay(title_text))
-        else:
-            container.add_item(discord.ui.TextDisplay(title_text))
+        title_text = f"**{plural} Rarity List**" if use_embed_style else f"# {plural} Rarity List"
+        container.add_item(discord.ui.TextDisplay(title_text))
         container.add_item(discord.ui.Separator())
 
         view.add_item(container)
