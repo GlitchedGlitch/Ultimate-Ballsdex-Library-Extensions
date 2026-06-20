@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "Rarity"
-version = "1.1.0"
+version = "1.2.0"
 description = "Rarity list command for BallsDex v3. Adds a command to see a rarity list of all enabled balls in the dex. This includes a search option where you can search for specific balls or balls within a rarity group :3"
 license = "MIT"
 license-files = ["LICENSE"]
