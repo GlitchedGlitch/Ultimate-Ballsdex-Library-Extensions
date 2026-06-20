@@ -20,6 +20,8 @@ from ballsdex.core.utils.menus.source import ListSource
 from ballsdex.core.utils.menus.formatter import ItemFormatter
 from settings.models import settings
 
+from .rarity_settings import load_settings
+
 if TYPE_CHECKING:
     from ballsdex.core.bot import BallsDexBot
 
@@ -35,6 +37,16 @@ def _ball_emoji(bot: "BallsDexBot", ball: Ball) -> str:
         if emoji:
             return str(emoji)
     return "⋄"
+
+
+def _hex_to_color(hex_str: str) -> discord.Color | None:
+    hex_str = hex_str.strip().lstrip("#")
+    if not hex_str:
+        return None
+    try:
+        return discord.Color(int(hex_str, 16))
+    except ValueError:
+        return None
 
 
 class RarityCog(commands.Cog):
@@ -81,11 +93,11 @@ class RarityItemFormatter(ItemFormatter):
 
 class RarityView(LayoutView):
     """Custom view with permission checking."""
-    
+
     def __init__(self, user_id: int, *, timeout: float | None = 180):
         super().__init__(timeout=timeout)
         self.user_id = user_id
-    
+
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user_id:
             await interaction.response.send_message(
@@ -98,11 +110,11 @@ class RarityView(LayoutView):
 
 class QuitButtonRow(ActionRow):
     """Quit button row."""
-    
+
     def __init__(self, rarity_view: RarityView):
         super().__init__()
         self.rarity_view = rarity_view
-    
+
     @button(label="Quit", style=discord.ButtonStyle.danger)
     async def quit_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
@@ -114,8 +126,8 @@ class QuitButtonRow(ActionRow):
 
 def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
     """
-    Build the rarity command as a standalone Command to attach to the Balls group.
-    Mirrors the v2 factory pattern so __init__.py can attach it the same way.
+    Build the rarity command as a standalone Command to attach to the Balls group
+    Mirrors the v2 factory pattern so __init__.py can attach it the same way
     """
 
     @app_commands.command(
@@ -134,8 +146,8 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
         ephemeral: bool = False,
     ):
         plural = settings.plural_collectible_name.capitalize()
+        pkg_settings = load_settings()
 
-        # Fetch all enabled balls from Django ORM
         all_balls: list[Ball] = [b async for b in Ball.objects.filter(enabled=True)]
 
         if not all_balls:
@@ -147,7 +159,7 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
 
         # ── Search mode ───────────────────────────────────────────────────────
         if search:
-            
+
             try:
                 rarity_value = float(search.replace(",", "."))
                 matches = [b for b in all_balls if float(b.rarity) == rarity_value]
@@ -165,7 +177,7 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
                 return
             except ValueError:
                 pass
-                
+
             match = next((b for b in all_balls if b.country.lower() == search.lower()), None)
             if not match:
                 match = next((b for b in all_balls if search.lower() in b.country.lower()), None)
@@ -186,14 +198,12 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
         # ── Full paginated list ───────────────────────────────────────────────
         await interaction.response.defer(ephemeral=ephemeral)
 
-        # Group balls by rarity value
         rarity_map: dict[float, list[Ball]] = defaultdict(list)
         for b in all_balls:
             rarity_map[float(b.rarity)].append(b)
 
         sorted_rarities = sorted(rarity_map.keys(), reverse=reverse)
 
-        # Build one textdisplay per rarity group, tgen chunk into pages
         all_items: list[discord.ui.Item] = []
         for r in sorted_rarities:
             group_balls = rarity_map[r]
@@ -209,37 +219,55 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
             )
             return
 
-        # Chunk into pages of GROUPS_PER_PAGE
         pages: list[list[discord.ui.Item]] = [
             all_items[i : i + GROUPS_PER_PAGE]
             for i in range(0, len(all_items), GROUPS_PER_PAGE)
         ]
 
-        # Build the custom RarityView with permission checking
+        line_color = _hex_to_color(pkg_settings["embed_color"])
+        use_embed_style = pkg_settings["style"] == "embed"
+        buttons_inside = pkg_settings["buttons_inside"] == "true"
+
         view = RarityView(interaction.user.id)
         container = discord.ui.Container()
+        if line_color is not None:
 
-        # Title section, very big title trust
-        container.add_item(discord.ui.TextDisplay(f"# {plural} Rarity List"))
+            container.accent_color = line_color
+
+        # Title section
+        title_text = f"# {plural} Rarity List"
+        if use_embed_style:
+
+            container.add_item(discord.ui.TextDisplay(title_text))
+        else:
+            container.add_item(discord.ui.TextDisplay(title_text))
         container.add_item(discord.ui.Separator())
 
         view.add_item(container)
 
         source = ListSource(pages)
+
         formatter = RarityItemFormatter(container, position=2)
         menu = Menu(bot, view, source, formatter)
 
-        # Initialize menu with container, buttons will be added inside container
         await menu.init(container=container, position=2)
-        
-        # Add quit button row after pagination controls
+
         quit_row = QuitButtonRow(view)
-        container.add_item(quit_row)
-        
-        # Force the formatter to run once before sending
+
+        if buttons_inside:
+
+            container.add_item(quit_row)
+        else:
+
+            for child in list(container.children):
+                if isinstance(child, ActionRow):
+                    container.remove_item(child)
+                    view.add_item(child)
+            view.add_item(quit_row)
+
         first_page = await source.get_page(0)
         await formatter.format_page(first_page)
-        
+
         await interaction.followup.send(view=view, ephemeral=ephemeral)
 
     @rarity.autocomplete("search")
