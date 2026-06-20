@@ -233,18 +233,24 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
 
             container.accent_color = line_color
 
-        title_text = f"## **{plural} Rarity List**" if use_embed_style else f"# {plural} Rarity List"
-        container.add_item(discord.ui.TextDisplay(title_text))
-        container.add_item(discord.ui.Separator())
+        if use_embed_style:
+            title_text = f"**{plural} Rarity List**"
+            container.add_item(discord.ui.TextDisplay(title_text))
+            header_item_count = 1  
+        else:
+            title_text = f"# {plural} Rarity List"
+            container.add_item(discord.ui.TextDisplay(title_text))
+            container.add_item(discord.ui.Separator())
+            header_item_count = 2  
 
         view.add_item(container)
 
         source = ListSource(pages)
 
-        formatter = RarityItemFormatter(container, position=2)
+        formatter = RarityItemFormatter(container, position=header_item_count)
         menu = Menu(bot, view, source, formatter)
 
-        await menu.init(container=container, position=2)
+        await menu.init(container=container, position=header_item_count)
 
         quit_row = QuitButtonRow(view)
 
