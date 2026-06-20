@@ -85,7 +85,6 @@ class RarityItemFormatter(ItemFormatter):
                 )
             )
 
-        # Buttons at the end of the page (i suffered much trying to fix this)
         for row in button_rows:
             self.item.add_item(row)
 
@@ -123,10 +122,79 @@ class QuitButtonRow(ActionRow):
         await interaction.edit_original_response(view=self.rarity_view)
 
 
+class EmbedPaginatorView(discord.ui.View):
+    """
+something
+    """
+
+    def __init__(
+        self,
+        user_id: int,
+        pages: list[discord.Embed],
+        buttons_inside: bool,
+        *,
+        timeout: float | None = 180,
+    ):
+        super().__init__(timeout=timeout)
+        self.user_id = user_id
+        self.pages = pages
+        self.page = 0
+        self.buttons_inside = buttons_inside
+        self._build()
+
+    def _build(self):
+        self.clear_items()
+        multi_page = len(self.pages) > 1
+
+        if multi_page:
+            prev_btn = Button(label="◀ Back", style=discord.ButtonStyle.secondary, disabled=self.page == 0)
+            prev_btn.callback = self._prev
+            self.add_item(prev_btn)
+
+            next_btn = Button(
+                label="Next ▶", style=discord.ButtonStyle.secondary,
+                disabled=self.page >= len(self.pages) - 1,
+            )
+            next_btn.callback = self._next
+            self.add_item(next_btn)
+
+        quit_btn = Button(label="Quit", style=discord.ButtonStyle.danger)
+        quit_btn.callback = self._quit
+        self.add_item(quit_btn)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "You are not allowed to interact with this.", ephemeral=True
+            )
+            return False
+        return True
+
+    async def _prev(self, interaction: discord.Interaction):
+        self.page -= 1
+        self._build()
+        await interaction.response.edit_message(embed=self.pages[self.page], view=self)
+
+    async def _next(self, interaction: discord.Interaction):
+        self.page += 1
+        self._build()
+        await interaction.response.edit_message(embed=self.pages[self.page], view=self)
+
+    async def _quit(self, interaction: discord.Interaction):
+        for child in self.children:
+            child.disabled = True  # type: ignore
+        await interaction.response.edit_message(view=self)
+        self.stop()
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True  # type: ignore
+
+
 def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
     """
-    Build the rarity command as a standalone Command to attach to the Balls group
-    Mirrors the v2 factory pattern so __init__.py can attach it the same way
+    Build the rarity command as a standalone Command to attach to the Balls group.
+    Mirrors the v2 factory pattern so __init__.py can attach it the same way.
     """
 
     @app_commands.command(
@@ -193,8 +261,6 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
                 ephemeral=True,
             )
             return
-
-        # ── Full paginated list ───────────────────────────────────────────────
         await interaction.response.defer(ephemeral=ephemeral)
 
         rarity_map: dict[float, list[Ball]] = defaultdict(list)
@@ -202,6 +268,52 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
             rarity_map[float(b.rarity)].append(b)
 
         sorted_rarities = sorted(rarity_map.keys(), reverse=reverse)
+
+        line_color = _hex_to_color(pkg_settings["embed_color"])
+        use_embed_style = pkg_settings["style"] == "embed"
+        buttons_inside = pkg_settings["buttons_inside"] == "true"
+
+        if not sorted_rarities:
+            await interaction.followup.send(
+                f"No {settings.plural_collectible_name} are currently enabled.",
+                ephemeral=ephemeral,
+            )
+            return
+
+        if use_embed_style:
+
+            entries: list[tuple[str, str]] = []
+            for r in sorted_rarities:
+                group_balls = rarity_map[r]
+                lines = "\n".join(
+                    f"⋄ {_ball_emoji(bot, b)} {b.country}" for b in group_balls
+                )
+                entries.append((f"∥ Rarity: {r}", lines))
+
+            chunks = [
+                entries[i : i + GROUPS_PER_PAGE]
+                for i in range(0, len(entries), GROUPS_PER_PAGE)
+            ]
+            total_pages = len(chunks)
+
+            embed_pages: list[discord.Embed] = []
+            for page_num, chunk in enumerate(chunks, start=1):
+                e = discord.Embed(
+                    title=f"{plural} Rarity List",
+                    color=line_color if line_color is not None else discord.Color(0xFFFFFF),
+                )
+                for name, value in chunk:
+                    e.add_field(name=name, value=value, inline=False)
+                if total_pages > 1:
+                    e.set_footer(text=f"Page {page_num}/{total_pages}")
+                embed_pages.append(e)
+
+            view = EmbedPaginatorView(interaction.user.id, embed_pages, buttons_inside)
+
+            await interaction.followup.send(
+                embed=embed_pages[0], view=view, ephemeral=ephemeral
+            )
+            return
 
         all_items: list[discord.ui.Item] = []
         for r in sorted_rarities:
@@ -211,42 +323,25 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
             )
             all_items.append(discord.ui.TextDisplay(f"**∥ Rarity: {r}**\n{lines}"))
 
-        if not all_items:
-            await interaction.followup.send(
-                f"No {settings.plural_collectible_name} are currently enabled.",
-                ephemeral=ephemeral,
-            )
-            return
-
         pages: list[list[discord.ui.Item]] = [
             all_items[i : i + GROUPS_PER_PAGE]
             for i in range(0, len(all_items), GROUPS_PER_PAGE)
         ]
 
-        line_color = _hex_to_color(pkg_settings["embed_color"])
-        use_embed_style = pkg_settings["style"] == "embed"
-        buttons_inside = pkg_settings["buttons_inside"] == "true"
-
         view = RarityView(interaction.user.id)
         container = discord.ui.Container()
         if line_color is not None:
-
+ 
             container.accent_color = line_color
 
-        if use_embed_style:
-            title_text = f"**{plural} Rarity List**"
-            container.add_item(discord.ui.TextDisplay(title_text))
-            header_item_count = 1  
-        else:
-            title_text = f"# {plural} Rarity List"
-            container.add_item(discord.ui.TextDisplay(title_text))
-            container.add_item(discord.ui.Separator())
-            header_item_count = 2  
+        title_text = f"# {plural} Rarity List"
+        container.add_item(discord.ui.TextDisplay(title_text))
+        container.add_item(discord.ui.Separator())
+        header_item_count = 2  
 
         view.add_item(container)
 
         source = ListSource(pages)
-
         formatter = RarityItemFormatter(container, position=header_item_count)
         menu = Menu(bot, view, source, formatter)
 
