@@ -3,7 +3,7 @@ from discord.ui import View, Button
 
 REPO   = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
 BRANCH = "v2-main"
-BASE   = f"https://api.github.com/repos/{REPO}/contents/packages/player/spawnrole/{{}}?ref={BRANCH}"
+BASE   = f"https://api.github.com/repos/{REPO}/contents/packages/config/spawnrole/{{}}?ref={BRANCH}"
 PKG    = "/code/ballsdex/packages/spawnrole"
 CONFIG = "/code/config.yml"
 PACKAGE_ENTRY = "  - ballsdex.packages.spawnrole"
@@ -191,9 +191,9 @@ def delete_files():
 
 def build_main_embed(installed, color):
     e = discord.Embed(
-        title="📢 Spawn Role Package",
+        title="Spawn Role Package",
         description=(
-            "Lets server admins set a role to be mentioned at the end of every spawn message.\n\n"
+            "Set a role to be mentioned at the end of every spawn message.\n\n"
             "**Commands**\n"
             "• `/config spawnrole` — set or remove the spawn role\n\n"
             "**Admin Panel**\n"
@@ -208,7 +208,7 @@ def build_main_embed(installed, color):
 
 def build_confirm_embed():
     e = discord.Embed(
-        title="🗑️ Delete Spawn Role Package",
+        title="Delete Spawn Role Package",
         description="⚠️ This removes the bot package and config entry.\nThe `spawn_role` database column is **kept** to avoid data loss.",
         color=discord.Color.orange(),
     )
@@ -219,7 +219,7 @@ def build_confirm_embed():
 def build_error_embed(action, error):
     short = error[:1000] + "..." if len(error) > 1000 else error
     e = discord.Embed(
-        title="❌ An error occurred",
+        title="An error occurred",
         description=f"An error occurred when **{action}** the package!\n\n```\n{short}\n```\n\nFull error attached below.",
         color=discord.Color.red(),
     )
@@ -264,7 +264,7 @@ class ConfirmDeleteView(View):
             self.stop()
             await self.parent.message.edit(
                 embed=build_result_embed(
-                    "🗑️ Successfully Deleted",
+                    "Successfully Deleted",
                     "Removed bot package and config entry.\nDatabase column kept.",
                     discord.Color.red(),
                 ),
@@ -329,9 +329,9 @@ class SpawnRoleInstallerView(View):
 
         async def update(i, ok=True):
             steps[i] = (steps[i][0], ok)
-            await self.message.edit(embed=_progress_embed("📥 Installing Spawn Role…", steps, discord.Color.blurple()), view=None)
+            await self.message.edit(embed=_progress_embed("Installing Spawn Role…", steps, discord.Color.blurple()), view=None)
 
-        await self.message.edit(embed=_progress_embed("📥 Installing Spawn Role…", steps, discord.Color.blurple()), view=None)
+        await self.message.edit(embed=_progress_embed("Installing Spawn Role…", steps, discord.Color.blurple()), view=None)
         try:
             os.makedirs(PKG, exist_ok=True); await update(0)
             download_bot_files(); await update(1)
@@ -353,7 +353,7 @@ class SpawnRoleInstallerView(View):
             self.done = True; self.stop()
             await self.message.edit(
                 embed=build_result_embed(
-                    "✅ Successfully Installed",
+                    "Successfully Installed",
                     "`/config spawnrole` is ready.\nAdmin panel: Guild Configs now shows Spawn Role.\n\nRestart the admin panel container to see the new column.",
                     discord.Color.green(),
                 ),
@@ -377,9 +377,9 @@ class SpawnRoleInstallerView(View):
 
         async def update(i, ok=True):
             steps[i] = (steps[i][0], ok)
-            await self.message.edit(embed=_progress_embed("🔄 Updating Spawn Role…", steps, discord.Color.blurple()), view=None)
+            await self.message.edit(embed=_progress_embed("Updating Spawn Role…", steps, discord.Color.blurple()), view=None)
 
-        await self.message.edit(embed=_progress_embed("🔄 Updating Spawn Role…", steps, discord.Color.blurple()), view=None)
+        await self.message.edit(embed=_progress_embed("Updating Spawn Role…", steps, discord.Color.blurple()), view=None)
         try:
             download_bot_files(); await update(0)
             loaded = "ballsdex.packages.spawnrole" in self.bot.extensions
@@ -399,7 +399,7 @@ class SpawnRoleInstallerView(View):
 
             self.done = True; self.stop()
             await self.message.edit(
-                embed=build_result_embed("🔄 Successfully Updated", "Package updated and reloaded.", discord.Color.blue()),
+                embed=build_result_embed("Successfully Updated", "Package updated and reloaded.", discord.Color.blue()),
                 view=None,
             )
         except Exception:
@@ -418,8 +418,54 @@ class SpawnRoleInstallerView(View):
         await self.message.edit(embed=build_confirm_embed(), view=ConfirmDeleteView(self))
 
 
-installed = is_installed()
-view = SpawnRoleInstallerView(bot, ctx, installed)
-color = discord.Color.gold() if installed else discord.Color.greyple()
-message = await ctx.send(embed=build_main_embed(installed, color), view=view)
-view.message = message
+def _is_v3() -> bool:
+    """Detect v3 by checking for Django setup and absence of a ready Tortoise ORM."""
+    try:
+        from django.apps import apps
+        apps.check_apps_ready()
+        return True  # Django is up — this is v3
+    except Exception:
+        pass
+    try:
+        import tortoise  # noqa: F401
+        return False  # Tortoise present, Django not ready — this is v2
+    except ImportError:
+        pass
+    return True
+
+if _is_v3():
+    await ctx.send(
+        embed=discord.Embed(
+            title="Incompatible Version",
+            description=(
+                "This installer is for **BallsDex v2** only.\n\n"
+                "Your instance appears to be running **v3**.\n\n"
+                "Please use the **v3 branch** of this package instead, or downgrade "
+                "to v2 before installing."
+            ),
+            color=discord.Color.red(),
+        ).set_footer(text=FOOTER)
+    )
+else:
+    installed = is_installed()
+    cmd_name = get_command_name()
+
+    view = SpawnRoleInstallerView(
+        bot,
+        ctx,
+        installed,
+        cmd_name
+    )
+
+    color = discord.Color.gold() if installed else discord.Color.greyple()
+
+    message = await ctx.send(
+        embed=build_main_embed(
+            installed,
+            color,
+            cmd_name
+        ),
+        view=view
+    )
+
+    view.message = message
