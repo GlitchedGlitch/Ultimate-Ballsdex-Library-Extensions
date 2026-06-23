@@ -110,7 +110,7 @@ def patch_guild_admin_py():
     if count == 0:
         raise RuntimeError(
             "Could not locate GuildAdmin.list_display pattern in guild.py. "
-            "Manual edit required — see INSTRUCTIONS.txt."
+            "Manual edit required — see [MANUAL_INSTRUCTIONS.md](https://github.com/GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions/blob/v2-main/packages/config/spawnrole/MANUAL_INSTRUCTIONS.md) in my repo."
         )
     with open(GUILD_ADMIN_PATH, "w") as f:
         f.write(new_content)
