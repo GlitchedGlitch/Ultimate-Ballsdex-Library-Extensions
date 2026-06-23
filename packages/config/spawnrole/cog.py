@@ -1,11 +1,5 @@
 """
-Spawn Role package for BallsDex.
-
-Adds /config spawnrole — lets SERVER admins (manage_guild permission)
-set a role to be displayed (not pinged) at the end of every spawn message.
-
-Stores spawn_role on the existing guildconfig table via a migration-added
-column, so no separate table is needed and data survives restarts.
+Spawn Role package for BallsDex :3
 """
 
 from __future__ import annotations
