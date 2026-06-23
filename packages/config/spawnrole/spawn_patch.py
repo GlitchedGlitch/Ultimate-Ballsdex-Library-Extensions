@@ -1,6 +1,5 @@
 """
-Patches BallSpawnView.spawn so the configured spawn_role is appended at the
-end of the spawn message as a visible role mention WITHOUT pinging anyone.
+This is where magic happens :3
 """
 
 import logging
@@ -26,8 +25,6 @@ async def _patched_spawn(self, channel: discord.TextChannel) -> bool:
     if not role_suffix:
         return await _original_spawn(self, channel)
 
-    # Temporarily wrap channel.send to inject the role mention and
-    # disable role pings via allowed_mentions
     original_send = channel.send
 
     async def patched_send(content=None, **kwargs):
