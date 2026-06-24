@@ -18,12 +18,12 @@ def _get_spawn_role_raw(config) -> int | None:
     """Safely get spawn_role value from a GuildConfig instance."""
     if config is None:
         return None
-
+    # Try Tortoise's internal _data dict first
     if hasattr(config, "_data"):
         val = config._data.get("spawn_role")
         if val is not None:
             return val
-
+    # Fallback to attribute access
     val = getattr(config, "spawn_role", None)
     if isinstance(val, int):
         return val
