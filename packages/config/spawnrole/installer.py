@@ -417,6 +417,7 @@ class SpawnRoleInstallerView(View):
         await interaction.response.defer()
         await self.message.edit(embed=build_confirm_embed(), view=ConfirmDeleteView(self))
 
+# ── Entry point ───────────────────────────────────────────────────────────────
 
 def _is_v3() -> bool:
     """Detect v3 by checking for Django setup and absence of a ready Tortoise ORM."""
@@ -448,24 +449,7 @@ if _is_v3():
     )
 else:
     installed = is_installed()
-    cmd_name = get_command_name()
-
-    view = SpawnRoleInstallerView(
-        bot,
-        ctx,
-        installed,
-        cmd_name
-    )
-
-    color = discord.Color.gold() if installed else discord.Color.greyple()
-
-    message = await ctx.send(
-        embed=build_main_embed(
-            installed,
-            color,
-            cmd_name
-        ),
-        view=view
-    )
-
+    view      = SpawnRoleInstallerView(bot, ctx, installed)
+    color     = discord.Color.gold() if installed else discord.Color.greyple()
+    message   = await ctx.send(embed=build_main_embed(installed, color), view=view)
     view.message = message
