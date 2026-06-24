@@ -22,19 +22,29 @@ log = logging.getLogger("ballsdex.packages.spawnrole")
 def _ensure_spawn_role_field():
     """Monkey-patch spawn_role onto GuildConfig if the model wasn't restarted."""
     if hasattr(GuildConfig, "spawn_role"):
-        return
+
+        if "spawn_role" in GuildConfig._meta.fields_db_projection:
+            return
 
     from tortoise import fields
 
+    field = fields.BigIntField(null=True, description="Discord role ID that gets mentioned in every spawn")
+    field.model = GuildConfig
+    field.model_field_name = "spawn_role"
+    field.source_field = "spawn_role"
 
-    GuildConfig.spawn_role = fields.BigIntField(
-        null=True,
-        description="Discord role ID that gets mentioned in every spawn",
-    )
+    GuildConfig.spawn_role = field
 
-    GuildConfig._meta.fields_map["spawn_role"] = GuildConfig.spawn_role
-    GuildConfig._meta.fields.add("spawn_role")
-    GuildConfig._meta.db_fields.add("spawn_role")
+    meta = GuildConfig._meta
+    meta.fields_map["spawn_role"] = field
+    meta.fields.add("spawn_role")
+    meta.db_fields.add("spawn_role")
+    meta.fields_db_projection["spawn_role"] = "spawn_role"
+    meta.db_default_values["spawn_role"] = None
+
+    if hasattr(meta, "default_ordering"):
+        pass
+
     log.debug("Runtime-patched spawn_role onto GuildConfig")
 
 _ensure_spawn_role_field()
