@@ -44,7 +44,6 @@ class _ChannelProxy:
         if content and isinstance(content, str) and self._role_suffix not in content:
             content = content + self._role_suffix
         
-        # Only allow the specific role to be mentioned, suppress everything else
         if self._role_id:
             kwargs["allowed_mentions"] = discord.AllowedMentions(
                 roles=[discord.Object(id=self._role_id)],
