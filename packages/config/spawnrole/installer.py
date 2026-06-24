@@ -1,12 +1,12 @@
 import base64, io, os, re, requests, traceback, discord
 from discord.ui import View, Button
 
-REPO   = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
+REPO = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
 BRANCH = "v2-main"
-BASE   = f"https://api.github.com/repos/{REPO}/contents/packages/config/spawnrole/{{}}?ref={BRANCH}"
-PKG    = "/code/ballsdex/packages/spawnrole"
+BASE = f"https://api.github.com/repos/{REPO}/contents/packages/config/spawnrole/{{}}?ref={BRANCH}"
+PKG = "/code/ballsdex/packages/spawnrole"
 CONFIG = "/code/config.yml"
-PACKAGE_ENTRY = "  - ballsdex.packages.spawnrole"
+PACKAGE_ENTRY = " - ballsdex.packages.spawnrole"
 BOT_FILES = ("__init__.py", "cog.py", "spawn_patch.py")
 
 MODELS_PATH = "/code/admin_panel/bd_models/models.py"
@@ -18,15 +18,12 @@ FOOTER_TIMEOUT = FOOTER + " • Timed out"
 
 BAR_FILLED, BAR_EMPTY, BAR_LEN = "█", "░", 10
 
-
 def _bar(c, t):
     filled = round(BAR_LEN * c / t)
     return f"`{BAR_FILLED * filled}{BAR_EMPTY * (BAR_LEN - filled)}` {round(100*c/t)}%"
 
-
 def _progress_embed(title, steps, color):
     done = sum(1 for _, s in steps if s is True)
-    lines = [f"{{None:'⬜',True:'✅',False:'❌'}}[s] {l}" for l, s in steps]
     lines = []
     for l, s in steps:
         icon = {None: "⬜", True: "✅", False: "❌"}[s]
@@ -35,10 +32,8 @@ def _progress_embed(title, steps, color):
     e.set_footer(text=FOOTER)
     return e
 
-
 def is_installed():
     return os.path.isdir(PKG) and os.path.isfile(os.path.join(PKG, "cog.py"))
-
 
 def download_bot_files():
     for f in BOT_FILES:
@@ -47,7 +42,6 @@ def download_bot_files():
         content = base64.b64decode(resp.json()["content"]).decode()
         with open(os.path.join(PKG, f), "w") as fh:
             fh.write(content)
-
 
 def add_to_config():
     with open(CONFIG, "r") as f:
@@ -66,14 +60,12 @@ def add_to_config():
     with open(CONFIG, "w") as f:
         f.writelines(lines)
 
-
 def remove_from_config():
     with open(CONFIG, "r") as f:
         lines = f.readlines()
     lines = [l for l in lines if "ballsdex.packages.spawnrole" not in l]
     with open(CONFIG, "w") as f:
         f.writelines(lines)
-
 
 def patch_models_py():
     """Add spawn_role field to GuildConfig in bd_models/models.py if not already present."""
@@ -97,7 +89,6 @@ def patch_models_py():
     with open(MODELS_PATH, "w") as f:
         f.write(new_content)
 
-
 def patch_guild_admin_py():
     """Add spawn_role to GuildAdmin.list_display if not already present."""
     with open(GUILD_ADMIN_PATH, "r") as f:
@@ -115,7 +106,6 @@ def patch_guild_admin_py():
     with open(GUILD_ADMIN_PATH, "w") as f:
         f.write(new_content)
 
-
 def get_last_migration_name() -> str:
     files = [
         f[:-3] for f in os.listdir(MIGRATIONS_DIR)
@@ -125,7 +115,6 @@ def get_last_migration_name() -> str:
         raise RuntimeError("No existing migrations found in bd_models/migrations.")
     files.sort()
     return files[-1]
-
 
 def get_next_migration_filename() -> str:
     files = [
@@ -139,7 +128,6 @@ def get_next_migration_filename() -> str:
             numbers.append(int(m.group(1)))
     next_num = (max(numbers) + 1) if numbers else 1
     return f"{next_num:04d}_guildconfig_spawn_role.py"
-
 
 def write_migration():
     """Generate and write the migration file with the correct dependency."""
@@ -172,7 +160,6 @@ class Migration(migrations.Migration):
     with open(path, "w") as f:
         f.write(content)
 
-
 def run_migration():
     import subprocess
     result = subprocess.run(
@@ -182,12 +169,10 @@ def run_migration():
     if result.returncode != 0:
         raise RuntimeError(f"Migration failed:\n{result.stdout}\n{result.stderr}")
 
-
 def delete_files():
     import shutil
     if os.path.isdir(PKG):
         shutil.rmtree(PKG)
-
 
 def build_main_embed(installed, color):
     e = discord.Embed(
@@ -205,7 +190,6 @@ def build_main_embed(installed, color):
     e.set_footer(text=FOOTER)
     return e
 
-
 def build_confirm_embed():
     e = discord.Embed(
         title="Delete Spawn Role Package",
@@ -214,7 +198,6 @@ def build_confirm_embed():
     )
     e.set_footer(text=FOOTER)
     return e
-
 
 def build_error_embed(action, error):
     short = error[:1000] + "..." if len(error) > 1000 else error
@@ -226,12 +209,10 @@ def build_error_embed(action, error):
     e.set_footer(text=FOOTER)
     return e
 
-
 def build_result_embed(title, desc, color):
     e = discord.Embed(title=title, description=desc, color=color)
     e.set_footer(text=FOOTER)
     return e
-
 
 class ConfirmDeleteView(View):
     def __init__(self, parent):
@@ -283,7 +264,6 @@ class ConfirmDeleteView(View):
         await interaction.response.defer()
         c = discord.Color.gold() if self.parent.installed else discord.Color.greyple()
         await self.parent.message.edit(embed=build_main_embed(self.parent.installed, c), view=self.parent)
-
 
 class SpawnRoleInstallerView(View):
     def __init__(self, bot, ctx, installed):
@@ -449,7 +429,7 @@ if _is_v3():
     )
 else:
     installed = is_installed()
-    view      = SpawnRoleInstallerView(bot, ctx, installed)
-    color     = discord.Color.gold() if installed else discord.Color.greyple()
-    message   = await ctx.send(embed=build_main_embed(installed, color), view=view)
+    view = SpawnRoleInstallerView(bot, ctx, installed)
+    color = discord.Color.gold() if installed else discord.Color.greyple()
+    message = await ctx.send(embed=build_main_embed(installed, color), view=view)
     view.message = message
