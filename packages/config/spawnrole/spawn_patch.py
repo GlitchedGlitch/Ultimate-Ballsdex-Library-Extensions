@@ -7,7 +7,7 @@ import logging
 import discord
 
 from ballsdex.core.models import GuildConfig
-from ballsdex.packages.countryballs.spawn import BallSpawnView
+from ballsdex.packages.countryballs.countryball import BallSpawnView
 
 log = logging.getLogger("ballsdex.packages.spawnrole")
 
