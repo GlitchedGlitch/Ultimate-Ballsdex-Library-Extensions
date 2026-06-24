@@ -14,11 +14,29 @@ log = logging.getLogger("ballsdex.packages.spawnrole")
 _original_spawn = BallSpawnView.spawn
 
 
+def _get_spawn_role_raw(config) -> int | None:
+    """Safely get spawn_role value from a GuildConfig instance."""
+    if config is None:
+        return None
+
+    if hasattr(config, "_data"):
+        val = config._data.get("spawn_role")
+        if val is not None:
+            return val
+
+    val = getattr(config, "spawn_role", None)
+    if isinstance(val, int):
+        return val
+    return None
+
+
 async def _patched_spawn(self, channel: discord.TextChannel) -> bool:
     config = await GuildConfig.get_or_none(guild_id=channel.guild.id)
     role_suffix = ""
-    if config and config.spawn_role:
-        role = channel.guild.get_role(config.spawn_role)
+    
+    spawn_role_id = _get_spawn_role_raw(config)
+    if spawn_role_id:
+        role = channel.guild.get_role(spawn_role_id)
         if role:
             role_suffix = f" <@&{role.id}>"
 
@@ -28,7 +46,7 @@ async def _patched_spawn(self, channel: discord.TextChannel) -> bool:
     original_send = channel.send
 
     async def patched_send(content=None, **kwargs):
-        if content:
+        if content and isinstance(content, str):
             content = content + role_suffix
         kwargs.setdefault("allowed_mentions", discord.AllowedMentions.none())
         return await original_send(content=content, **kwargs)
