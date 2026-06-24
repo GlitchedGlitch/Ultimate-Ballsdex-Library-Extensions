@@ -6,7 +6,6 @@ import logging
 
 import discord
 
-from ballsdex.core.models import GuildConfig
 from ballsdex.packages.countryballs.countryball import BallSpawnView
 
 log = logging.getLogger("ballsdex.packages.spawnrole")
@@ -31,7 +30,7 @@ async def _fetch_spawn_role_from_db(guild_id: int) -> int | None:
 
 
 async def _patched_spawn(self, channel: discord.TextChannel) -> bool:
-    # Fetch role ID directly from DB to bypass any instance cache issues
+    # Fetch role ID directly from DB
     spawn_role_id = await _fetch_spawn_role_from_db(channel.guild.id)
     
     role_suffix = ""
