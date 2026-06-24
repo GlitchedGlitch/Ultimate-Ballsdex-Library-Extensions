@@ -19,9 +19,9 @@ TOML_ENTRY  = (
 )
 
 EXTRA_TOML       = "/code/admin_panel/config/extra.toml"
-MODELS_PATH      = "/code/admin_panel/bd_models/models.py"
-GUILD_ADMIN_PATH = "/code/admin_panel/bd_models/admin/guild.py"
-MIGRATIONS_DIR   = "/code/admin_panel/bd_models/migrations"
+MODELS_PATH      = "/opt/venv/lib/python3.14/site-packages/bd_models/models.py"
+GUILD_ADMIN_PATH = "/opt/venv/lib/python3.14/site-packages/bd_models/admin/guild.py"
+MIGRATIONS_DIR   = "/opt/venv/lib/python3.14/site-packages/bd_models/migrations"
 
 FOOTER         = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
 FOOTER_TIMEOUT = FOOTER + " • Timed out"
@@ -75,10 +75,19 @@ def is_installed() -> bool:
 
 def patch_models_py():
     """Add spawn_role field to GuildConfig in bd_models/models.py if not already present."""
+    if not os.path.isfile(MODELS_PATH):
+        raise RuntimeError(
+            f"Could not find {MODELS_PATH}.\n\n"
+            "This usually means bd_models is installed at a different path in your "
+            "image, or this container has no writable access to the venv's site-packages. "
+            "Check your docker-compose.yml `develop.watch` target paths and Python version."
+        )
+
     with open(MODELS_PATH, "r") as f:
         content = f.read()
     if "spawn_role" in content:
         return  # already patched
+
     pattern = (
         r'(class GuildConfig\(models\.Model\):\n'
         r'\s+guild_id = models\.BigIntegerField\(unique=True, help_text="Discord guild ID"\)\n'
@@ -102,6 +111,9 @@ def patch_models_py():
 
 def unpatch_models_py():
     """Remove spawn_role field from GuildConfig in bd_models/models.py."""
+    if not os.path.isfile(MODELS_PATH):
+        return
+
     with open(MODELS_PATH, "r") as f:
         content = f.read()
     if "spawn_role" not in content:
@@ -115,7 +127,7 @@ def unpatch_models_py():
     )
     new_content, count = re.subn(pattern, "", content)
     if count == 0:
-
+        # Fallback: looser pattern in case formatting drifted
         pattern2 = r'\n    spawn_role = models\.BigIntegerField\([^)]*\)\n'
         new_content, count = re.subn(pattern2, "\n", content, count=1)
     if count == 0:
@@ -286,7 +298,7 @@ def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
             "• Adds `spawn_role` to the existing Guild Configs section\n\n"
             "⚠️ This package patches core files (`bd_models/models.py`, "
             "`bd_models/admin/guild.py`) and generates a database migration. "
-            "It is more invasive than typical packages 3:.\n\n"
+            "It is more invasive than typical packages.\n\n"
             f"**Status:** {status}"
         ),
         color=color,
@@ -299,20 +311,25 @@ def build_warning_embed() -> discord.Embed:
     e = discord.Embed(
         title="⚠️ Before Installing — Required Setup",
         description=(
-            "This installer needs to write to `config/extra.toml` AND directly "
-            "patch core files under `admin_panel/bd_models/`. Both require write "
-            "access that Docker mounts as **read-only** by default.\n\n"
-            "**Find these lines** in your `docker-compose.yml` (all three services: "
-            "`bot`, `admin-panel`, and `migration`) and change `:ro` to `:rw`:\n"
-            "```yaml\n"
-            "- \"./config:/code/admin_panel/config:rw\"\n"
-            "- \"./extra:/code/extra:rw\"\n"
-            "```\n"
-            "You'll also need the `admin_panel` source directory itself to be writable "
-            "(it usually is by default since it's not a `:ro` mount, but double-check).\n\n"
-            "Then restart your containers:\n"
+            "This installer needs to write to `config/extra.toml` and directly "
+            "patch `bd_models/models.py` and `bd_models/admin/guild.py` **inside "
+            "this bot container's filesystem**.\n\n"
+            "⚠️ **Important limitation:** in a typical multi-container setup, "
+            "`bot`, `admin-panel`, and `migration` are **separate containers**, "
+            "each with their own copy of `bd_models`. A patch applied from inside "
+            "the `bot` container only affects that container — it will **not** "
+            "automatically reach `admin-panel` or `migration` unless your "
+            "`docker-compose.yml` mounts `./admin_panel` as a shared volume "
+            "across all three services.\n\n"
+            "**Check your `docker-compose.yml`:** if `admin_panel` (or wherever "
+            "`bd_models` lives) is only baked into the image and not bind-mounted "
+            "from your host into all three services, you'll need to patch it "
+            "manually on the host and rebuild, rather than relying on this "
+            "installer's runtime patch.\n\n"
+            "**If you do have a shared mount**, make sure it and `config`/`extra` "
+            "allow write access (`rw`, not `ro`) across all services, then run:\n"
             "```\ndocker compose down\ndocker compose build --no-cache\ndocker compose up -d\n```\n\n"
-            "Once done, click **Confirm Install** below."
+            "Once ready, click **Confirm Install** below."
         ),
         color=discord.Color.orange(),
     )
