@@ -21,33 +21,58 @@ log = logging.getLogger("ballsdex.packages.spawnrole")
 
 def _ensure_spawn_role_field():
     """Monkey-patch spawn_role onto GuildConfig if the model wasn't restarted."""
-    if hasattr(GuildConfig, "spawn_role"):
+    if getattr(GuildConfig, "_spawn_role_patched", False):
+        return
 
-        if "spawn_role" in GuildConfig._meta.fields_db_projection:
-            return
+    meta = GuildConfig._meta
+    if "spawn_role" in getattr(meta, "fields_db_projection", {}):
+        GuildConfig._spawn_role_patched = True
+        return
 
     from tortoise import fields
 
-    field = fields.BigIntField(null=True, description="Discord role ID that gets mentioned in every spawn")
-    field.model = GuildConfig
-    field.model_field_name = "spawn_role"
-    field.source_field = "spawn_role"
+    _field = fields.BigIntField(null=True, description="Discord role ID that gets mentioned in every spawn")
+    _field.model = GuildConfig
+    _field.model_field_name = "spawn_role"
+    _field.source_field = "spawn_role"
 
-    GuildConfig.spawn_role = field
+    class _SpawnRoleDescriptor:
+        def __get__(self, obj, objtype=None):
+            if obj is None:
+                return _field
+            if hasattr(obj, "_data"):
+                return obj._data.get("spawn_role")
+            return getattr(obj, "__dict__", {}).get("spawn_role")
+        
+        def __set__(self, obj, value):
+            if hasattr(obj, "_data"):
+                obj._data["spawn_role"] = value
+            else:
+                obj.__dict__["spawn_role"] = value
 
-    meta = GuildConfig._meta
-    meta.fields_map["spawn_role"] = field
+    meta.fields_map["spawn_role"] = _field
     meta.fields.add("spawn_role")
     meta.db_fields.add("spawn_role")
     meta.fields_db_projection["spawn_role"] = "spawn_role"
-    meta.db_default_values["spawn_role"] = None
+    
+    if hasattr(meta, "db_default_fields"):
+        meta.db_default_fields.add("spawn_role")
 
-    if hasattr(meta, "default_ordering"):
-        pass
+    GuildConfig.spawn_role = _SpawnRoleDescriptor()  # type: ignore
+    GuildConfig._spawn_role_patched = True
 
     log.debug("Runtime-patched spawn_role onto GuildConfig")
 
 _ensure_spawn_role_field()
+
+
+def _get_spawn_role(config: GuildConfig) -> int | None:
+    """Safely get the spawn_role value from a GuildConfig instance."""
+    val = getattr(config, "spawn_role", None)
+    if val is not None and not isinstance(val, int):
+        if hasattr(config, "_data"):
+            val = config._data.get("spawn_role")
+    return val
 
 
 @app_commands.guild_only()
@@ -103,15 +128,16 @@ class SpawnRoleCog(commands.Cog):
 
             config, _ = await GuildConfig.get_or_create(guild_id=guild_id)
 
-            if remove or (role and config.spawn_role == role.id):
-                old_role_id = config.spawn_role
+            current_role_id = _get_spawn_role(config)
+
+            if remove or (role and current_role_id == role.id):
                 config.spawn_role = None  # type: ignore
                 await config.save(update_fields=("spawn_role",))
 
-                if old_role_id:
+                if current_role_id:
                     await interaction.response.send_message(
                         f"{settings.bot_name} will no longer alert "
-                        f"<@&{old_role_id}> when "
+                        f"<@&{current_role_id}> when "
                         f"{settings.plural_collectible_name} spawn.",
                         allowed_mentions=discord.AllowedMentions.none(),
                     )
