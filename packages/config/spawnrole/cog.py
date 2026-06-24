@@ -27,6 +27,7 @@ def _ensure_spawn_role_field():
     if getattr(GuildConfig, "_spawn_role_patched", False):
         return
 
+    # Check if descriptor is already installed (from previous load)
     attr = getattr(GuildConfig, "spawn_role", None)
     if attr is not None and hasattr(type(attr), "__get__"):
         GuildConfig._spawn_role_patched = True
@@ -58,6 +59,7 @@ def _ensure_spawn_role_field():
     meta.fields.add("spawn_role")
     meta.db_fields.add("spawn_role")
     meta.fields_db_projection["spawn_role"] = "spawn_role"
+    # DO NOT touch db_default_fields — it's a structured internal list
 
     GuildConfig.spawn_role = _SpawnRoleDescriptor()  # type: ignore
     GuildConfig._spawn_role_patched = True
@@ -67,10 +69,10 @@ def _ensure_spawn_role_field():
 _ensure_spawn_role_field()
 
 
-# ── Helper to fetch spawn_role reliably from DB ──
+# ── DB helper to fetch spawn_role reliably ──
 
 async def _fetch_spawn_role_from_db(guild_id: int) -> int | None:
-    """Fetch spawn_role directly from the database to avoid cache issues."""
+    """Fetch spawn_role directly from the database, bypassing any instance cache issues."""
     try:
         from tortoise import Tortoise
         conn = Tortoise.get_connection("default")
@@ -85,38 +87,29 @@ async def _fetch_spawn_role_from_db(guild_id: int) -> int | None:
     return None
 
 
-def _get_spawn_role_from_instance(config: GuildConfig) -> int | None:
-    """Get spawn_role from a GuildConfig instance's _data dict."""
-    if hasattr(config, "_data"):
-        val = config._data.get("spawn_role")
-        if val is not None:
-            return val
-    val = getattr(config, "spawn_role", None)
-    if isinstance(val, int):
-        return val
-    return None
-
-
-# ── Patch GuildConfig.save() to preserve spawn_role on full saves ──
+# ── Patch GuildConfig.save() to preserve spawn_role ──
 
 def _patch_guildconfig_save():
-    """Patch GuildConfig.save() to preserve spawn_role when other commands do full saves."""
+    """Patch GuildConfig.save() so other /config commands don't wipe spawn_role."""
     if getattr(GuildConfig, "_spawn_role_save_patched", False):
         return
     
     _original_save = GuildConfig.save
     
     async def _patched_save(self, *args, **kwargs):
-        # If doing a full save (no update_fields specified), preserve spawn_role
-        if kwargs.get("update_fields") is None:
-            if hasattr(self, "_data") and "spawn_role" not in self._data:
-                # Fetch current value from DB to prevent it being set to NULL
-                try:
-                    current = await _fetch_spawn_role_from_db(self.guild_id)
-                    if current is not None:
-                        self._data["spawn_role"] = current
-                except Exception:
-                    pass  # DB might not have column yet, ignore
+        update_fields = kwargs.get("update_fields")
+        
+        # If doing a full save (no update_fields), preserve spawn_role
+        if update_fields is None:
+            if hasattr(self, "_data"):
+                # If spawn_role is not in _data, fetch from DB to preserve it
+                if "spawn_role" not in self._data:
+                    try:
+                        current = await _fetch_spawn_role_from_db(self.guild_id)
+                        if current is not None:
+                            self._data["spawn_role"] = current
+                    except Exception:
+                        pass
         
         return await _original_save(self, *args, **kwargs)
     
@@ -125,6 +118,8 @@ def _patch_guildconfig_save():
 
 _patch_guildconfig_save()
 
+
+# ── Cog ──
 
 @app_commands.guild_only()
 class SpawnRoleGroup(app_commands.Group):
@@ -177,7 +172,7 @@ class SpawnRoleCog(commands.Cog):
             guild_id = interaction.guild_id
             assert guild_id
 
-            # Always fetch fresh from DB to get accurate current value
+            # Always read current value from DB first for accurate check
             current_role_id = await _fetch_spawn_role_from_db(guild_id)
 
             if remove or (role and current_role_id == role.id):
