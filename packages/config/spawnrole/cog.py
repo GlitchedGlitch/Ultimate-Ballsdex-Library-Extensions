@@ -19,13 +19,33 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("ballsdex.packages.spawnrole")
 
+def _ensure_spawn_role_field():
+    """Monkey-patch spawn_role onto GuildConfig if the model wasn't restarted."""
+    if hasattr(GuildConfig, "spawn_role"):
+        return
+
+    from tortoise import fields
+
+
+    GuildConfig.spawn_role = fields.BigIntField(
+        null=True,
+        description="Discord role ID that gets mentioned in every spawn",
+    )
+
+    GuildConfig._meta.fields_map["spawn_role"] = GuildConfig.spawn_role
+    GuildConfig._meta.fields.add("spawn_role")
+    GuildConfig._meta.db_fields.add("spawn_role")
+    log.debug("Runtime-patched spawn_role onto GuildConfig")
+
+_ensure_spawn_role_field()
+
 
 @app_commands.guild_only()
 class SpawnRoleGroup(app_commands.Group):
     """Server-side spawn role configuration, attached under /config."""
 
     def __init__(self, bot: "BallsDexBot"):
-        super().__init__(name="spawnrole_group_unused")  # placeholder, not used directly
+        super().__init__(name="spawnrole_group_unused")
         self.bot = bot
 
 
@@ -110,3 +130,7 @@ class SpawnRoleCog(commands.Cog):
             )
 
         return spawnrole
+
+
+async def setup(bot: "BallsDexBot"):
+    await bot.add_cog(SpawnRoleCog(bot))
