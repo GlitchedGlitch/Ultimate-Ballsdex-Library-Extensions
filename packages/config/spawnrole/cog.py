@@ -19,13 +19,16 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("ballsdex.packages.spawnrole")
 
+
+# ── Runtime model patch ──
+
 def _ensure_spawn_role_field():
     """Monkey-patch spawn_role onto GuildConfig if the model wasn't restarted."""
     if getattr(GuildConfig, "_spawn_role_patched", False):
         return
 
-    meta = GuildConfig._meta
-    if "spawn_role" in getattr(meta, "fields_db_projection", {}):
+    attr = getattr(GuildConfig, "spawn_role", None)
+    if attr is not None and hasattr(type(attr), "__get__"):
         GuildConfig._spawn_role_patched = True
         return
 
@@ -50,13 +53,11 @@ def _ensure_spawn_role_field():
             else:
                 obj.__dict__["spawn_role"] = value
 
+    meta = GuildConfig._meta
     meta.fields_map["spawn_role"] = _field
     meta.fields.add("spawn_role")
     meta.db_fields.add("spawn_role")
     meta.fields_db_projection["spawn_role"] = "spawn_role"
-    
-    if hasattr(meta, "db_default_fields"):
-        meta.db_default_fields.add("spawn_role")
 
     GuildConfig.spawn_role = _SpawnRoleDescriptor()  # type: ignore
     GuildConfig._spawn_role_patched = True
@@ -66,13 +67,63 @@ def _ensure_spawn_role_field():
 _ensure_spawn_role_field()
 
 
-def _get_spawn_role(config: GuildConfig) -> int | None:
-    """Safely get the spawn_role value from a GuildConfig instance."""
+# ── Helper to fetch spawn_role reliably from DB ──
+
+async def _fetch_spawn_role_from_db(guild_id: int) -> int | None:
+    """Fetch spawn_role directly from the database to avoid cache issues."""
+    try:
+        from tortoise import Tortoise
+        conn = Tortoise.get_connection("default")
+        result = await conn.execute_query_dict(
+            "SELECT spawn_role FROM guildconfig WHERE guild_id = %s",
+            [guild_id]
+        )
+        if result and result[0].get("spawn_role") is not None:
+            return int(result[0]["spawn_role"])
+    except Exception as e:
+        log.debug(f"Could not fetch spawn_role from DB: {e}")
+    return None
+
+
+def _get_spawn_role_from_instance(config: GuildConfig) -> int | None:
+    """Get spawn_role from a GuildConfig instance's _data dict."""
+    if hasattr(config, "_data"):
+        val = config._data.get("spawn_role")
+        if val is not None:
+            return val
     val = getattr(config, "spawn_role", None)
-    if val is not None and not isinstance(val, int):
-        if hasattr(config, "_data"):
-            val = config._data.get("spawn_role")
-    return val
+    if isinstance(val, int):
+        return val
+    return None
+
+
+# ── Patch GuildConfig.save() to preserve spawn_role on full saves ──
+
+def _patch_guildconfig_save():
+    """Patch GuildConfig.save() to preserve spawn_role when other commands do full saves."""
+    if getattr(GuildConfig, "_spawn_role_save_patched", False):
+        return
+    
+    _original_save = GuildConfig.save
+    
+    async def _patched_save(self, *args, **kwargs):
+        # If doing a full save (no update_fields specified), preserve spawn_role
+        if kwargs.get("update_fields") is None:
+            if hasattr(self, "_data") and "spawn_role" not in self._data:
+                # Fetch current value from DB to prevent it being set to NULL
+                try:
+                    current = await _fetch_spawn_role_from_db(self.guild_id)
+                    if current is not None:
+                        self._data["spawn_role"] = current
+                except Exception:
+                    pass  # DB might not have column yet, ignore
+        
+        return await _original_save(self, *args, **kwargs)
+    
+    GuildConfig.save = _patched_save
+    GuildConfig._spawn_role_save_patched = True
+
+_patch_guildconfig_save()
 
 
 @app_commands.guild_only()
@@ -126,11 +177,14 @@ class SpawnRoleCog(commands.Cog):
             guild_id = interaction.guild_id
             assert guild_id
 
-            config, _ = await GuildConfig.get_or_create(guild_id=guild_id)
-
-            current_role_id = _get_spawn_role(config)
+            # Always fetch fresh from DB to get accurate current value
+            current_role_id = await _fetch_spawn_role_from_db(guild_id)
 
             if remove or (role and current_role_id == role.id):
+                # Remove the role
+                config, _ = await GuildConfig.get_or_create(guild_id=guild_id)
+                if hasattr(config, "_data"):
+                    config._data["spawn_role"] = None
                 config.spawn_role = None  # type: ignore
                 await config.save(update_fields=("spawn_role",))
 
@@ -155,6 +209,10 @@ class SpawnRoleCog(commands.Cog):
                 )
                 return
 
+            # Set the role
+            config, _ = await GuildConfig.get_or_create(guild_id=guild_id)
+            if hasattr(config, "_data"):
+                config._data["spawn_role"] = role.id
             config.spawn_role = role.id  # type: ignore
             await config.save(update_fields=("spawn_role",))
 
