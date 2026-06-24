@@ -145,28 +145,30 @@ def write_migration():
     """Generate and write the migration file with the correct dependency."""
     last_migration = get_last_migration_name()
     filename = get_next_migration_filename()
-    content = textwrap.dedent(f'''\
-        from django.db import migrations, models
-
-
-        class Migration(migrations.Migration):
-
-            dependencies = [
-                ("bd_models", "{last_migration}"),
-            ]
-
-            operations = [
-                migrations.AddField(
-                    model_name="guildconfig",
-                    name="spawn_role",
-                    field=models.BigIntegerField(
-                        blank=True,
-                        null=True,
-                        help_text="Discord role ID that gets mentioned in every spawn",
-                    ),
-                ),
-            ]
-        ''')
+    lines = [
+        "from django.db import migrations, models",
+        "",
+        "",
+        "class Migration(migrations.Migration):",
+        "",
+        '    dependencies = [',
+        '        ("bd_models", "%s"),' % last_migration,
+        "    ]",
+        "",
+        "    operations = [",
+        "        migrations.AddField(",
+        '            model_name="guildconfig",',
+        '            name="spawn_role",',
+        "            field=models.BigIntegerField(",
+        "                blank=True,",
+        "                null=True,",
+        '                help_text="Discord role ID that gets mentioned in every spawn",',
+        "            ),",
+        "        ),",
+        "    ]",
+        "",
+    ]
+    content = "\n".join(lines)
     path = os.path.join(MIGRATIONS_DIR, filename)
     if os.path.isfile(path):
         return  # already written
