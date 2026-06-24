@@ -6,7 +6,7 @@ BRANCH = "v2-main"
 BASE = f"https://api.github.com/repos/{REPO}/contents/packages/config/spawnrole/{{}}?ref={BRANCH}"
 PKG = "/code/ballsdex/packages/spawnrole"
 CONFIG = "/code/config.yml"
-PACKAGE_ENTRY = " - ballsdex.packages.spawnrole"
+PACKAGE_ENTRY = "  - ballsdex.packages.spawnrole"
 BOT_FILES = ("__init__.py", "cog.py", "spawn_patch.py")
 
 MODELS_PATH = "/code/admin_panel/bd_models/models.py"
