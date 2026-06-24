@@ -19,9 +19,6 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("ballsdex.packages.spawnrole")
 
-
-# ── Raw SQL helpers (most reliable, bypasses Tortoise model caching issues) ──
-
 async def _fetch_spawn_role_from_db(guild_id: int) -> int | None:
     """Fetch spawn_role directly from the database."""
     try:
@@ -60,9 +57,6 @@ async def _set_spawn_role_in_db(guild_id: int, role_id: int | None) -> None:
             [guild_id, role_id]
         )
 
-
-# ── GuildConfig.save() patch to preserve spawn_role from other commands ──
-
 def _patch_guildconfig_save():
     """Patch GuildConfig.save() so /config disable/channel doesn't wipe spawn_role."""
     if getattr(GuildConfig, "_spawn_role_save_patched", False):
@@ -71,7 +65,7 @@ def _patch_guildconfig_save():
     _original_save = GuildConfig.save
     
     async def _patched_save(self, *args, **kwargs):
-        # On full saves (no update_fields), preserve spawn_role if missing from _data
+
         if kwargs.get("update_fields") is None and hasattr(self, "_data"):
             if "spawn_role" not in self._data:
                 try:
@@ -95,9 +89,6 @@ def _patch_guildconfig_save():
     GuildConfig._spawn_role_save_patched = True
 
 _patch_guildconfig_save()
-
-
-# ── Cog ──
 
 @app_commands.guild_only()
 class SpawnRoleGroup(app_commands.Group):
@@ -150,11 +141,9 @@ class SpawnRoleCog(commands.Cog):
             guild_id = interaction.guild_id
             assert guild_id
 
-            # Always read current value from DB
             current_role_id = await _fetch_spawn_role_from_db(guild_id)
 
             if remove or (role and current_role_id == role.id):
-                # Remove the role
                 await _set_spawn_role_in_db(guild_id, None)
 
                 if current_role_id:
@@ -178,7 +167,6 @@ class SpawnRoleCog(commands.Cog):
                 )
                 return
 
-            # Set the role
             await _set_spawn_role_in_db(guild_id, role.id)
 
             await interaction.response.send_message(
