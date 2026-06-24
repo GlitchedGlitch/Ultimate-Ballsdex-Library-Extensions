@@ -14,27 +14,27 @@ log = logging.getLogger("ballsdex.packages.spawnrole")
 _original_spawn = BallSpawnView.spawn
 
 
-def _get_spawn_role_raw(config) -> int | None:
-    """Safely get spawn_role value from a GuildConfig instance."""
-    if config is None:
-        return None
-    # Try Tortoise's internal _data dict first
-    if hasattr(config, "_data"):
-        val = config._data.get("spawn_role")
-        if val is not None:
-            return val
-    # Fallback to attribute access
-    val = getattr(config, "spawn_role", None)
-    if isinstance(val, int):
-        return val
+async def _fetch_spawn_role_from_db(guild_id: int) -> int | None:
+    """Fetch spawn_role directly from the database."""
+    try:
+        from tortoise import Tortoise
+        conn = Tortoise.get_connection("default")
+        result = await conn.execute_query_dict(
+            "SELECT spawn_role FROM guildconfig WHERE guild_id = %s",
+            [guild_id]
+        )
+        if result and result[0].get("spawn_role") is not None:
+            return int(result[0]["spawn_role"])
+    except Exception:
+        pass
     return None
 
 
 async def _patched_spawn(self, channel: discord.TextChannel) -> bool:
-    config = await GuildConfig.get_or_none(guild_id=channel.guild.id)
-    role_suffix = ""
+    # Fetch role ID directly from DB to bypass any instance cache issues
+    spawn_role_id = await _fetch_spawn_role_from_db(channel.guild.id)
     
-    spawn_role_id = _get_spawn_role_raw(config)
+    role_suffix = ""
     if spawn_role_id:
         role = channel.guild.get_role(spawn_role_id)
         if role:
