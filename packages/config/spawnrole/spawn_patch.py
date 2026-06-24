@@ -29,6 +29,24 @@ async def _fetch_spawn_role_from_db(guild_id: int) -> int | None:
     return None
 
 
+class _ChannelProxy:
+    """Proxy that wraps a TextChannel and modifies send() content."""
+    
+    def __init__(self, channel: discord.TextChannel, role_suffix: str):
+        self._channel = channel
+        self._role_suffix = role_suffix
+    
+    def __getattr__(self, name: str):
+        # Delegate all other attributes to the real channel
+        return getattr(self._channel, name)
+    
+    async def send(self, content=None, **kwargs):
+        if content and isinstance(content, str) and self._role_suffix not in content:
+            content = content + self._role_suffix
+        kwargs.setdefault("allowed_mentions", discord.AllowedMentions.none())
+        return await self._channel.send(content=content, **kwargs)
+
+
 async def _patched_spawn(self, channel: discord.TextChannel) -> bool:
     # Fetch role ID directly from DB
     spawn_role_id = await _fetch_spawn_role_from_db(channel.guild.id)
@@ -42,19 +60,10 @@ async def _patched_spawn(self, channel: discord.TextChannel) -> bool:
     if not role_suffix:
         return await _original_spawn(self, channel)
 
-    original_send = channel.send
-
-    async def patched_send(content=None, **kwargs):
-        if content and isinstance(content, str):
-            content = content + role_suffix
-        kwargs.setdefault("allowed_mentions", discord.AllowedMentions.none())
-        return await original_send(content=content, **kwargs)
-
-    channel.send = patched_send  # type: ignore
-    try:
-        return await _original_spawn(self, channel)
-    finally:
-        channel.send = original_send  # type: ignore
+    # Wrap the channel in our proxy
+    proxy_channel = _ChannelProxy(channel, role_suffix)
+    
+    return await _original_spawn(self, proxy_channel)
 
 
 def apply():
