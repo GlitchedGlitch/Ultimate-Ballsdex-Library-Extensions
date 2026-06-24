@@ -19,7 +19,7 @@ async def _fetch_spawn_role_from_db(guild_id: int) -> int | None:
         from tortoise import Tortoise
         conn = Tortoise.get_connection("default")
         result = await conn.execute_query_dict(
-            "SELECT spawn_role FROM guildconfig WHERE guild_id = %s",
+            "SELECT spawn_role FROM guildconfig WHERE guild_id = $1",
             [guild_id]
         )
         if result and result[0].get("spawn_role") is not None:
