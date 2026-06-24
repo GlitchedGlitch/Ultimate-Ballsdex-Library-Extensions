@@ -28,7 +28,7 @@ async def _fetch_spawn_role_from_db(guild_id: int) -> int | None:
         from tortoise import Tortoise
         conn = Tortoise.get_connection("default")
         result = await conn.execute_query_dict(
-            "SELECT spawn_role FROM guildconfig WHERE guild_id = %s",
+            "SELECT spawn_role FROM guildconfig WHERE guild_id = $1",
             [guild_id]
         )
         if result and result[0].get("spawn_role") is not None:
@@ -43,22 +43,20 @@ async def _set_spawn_role_in_db(guild_id: int, role_id: int | None) -> None:
     from tortoise import Tortoise
     conn = Tortoise.get_connection("default")
     
-    # Check if row exists
     result = await conn.execute_query_dict(
-        "SELECT guild_id FROM guildconfig WHERE guild_id = %s",
+        "SELECT guild_id FROM guildconfig WHERE guild_id = $1",
         [guild_id]
     )
     
     if result:
         await conn.execute_query_dict(
-            "UPDATE guildconfig SET spawn_role = %s WHERE guild_id = %s",
+            "UPDATE guildconfig SET spawn_role = $1 WHERE guild_id = $2",
             [role_id, guild_id]
         )
     else:
-        # Insert with defaults
         await conn.execute_query_dict(
             "INSERT INTO guildconfig (guild_id, spawn_channel, enabled, silent, spawn_role) "
-            "VALUES (%s, NULL, TRUE, FALSE, %s)",
+            "VALUES ($1, NULL, TRUE, FALSE, $2)",
             [guild_id, role_id]
         )
 
@@ -66,7 +64,7 @@ async def _set_spawn_role_in_db(guild_id: int, role_id: int | None) -> None:
 # ── GuildConfig.save() patch to preserve spawn_role from other commands ──
 
 def _patch_guildconfig_save():
-    """Patch GuildConfig.save() so /config disable doesn't wipe spawn_role."""
+    """Patch GuildConfig.save() so /config disable/channel doesn't wipe spawn_role."""
     if getattr(GuildConfig, "_spawn_role_save_patched", False):
         return
     
@@ -77,10 +75,19 @@ def _patch_guildconfig_save():
         if kwargs.get("update_fields") is None and hasattr(self, "_data"):
             if "spawn_role" not in self._data:
                 try:
-                    current = await _fetch_spawn_role_from_db(self.guild_id)
-                    self._data["spawn_role"] = current
+                    from tortoise import Tortoise
+                    conn = Tortoise.get_connection("default")
+                    result = await conn.execute_query_dict(
+                        "SELECT spawn_role FROM guildconfig WHERE guild_id = $1",
+                        [self.guild_id]
+                    )
+                    if result and result[0].get("spawn_role") is not None:
+                        self._data["spawn_role"] = result[0]["spawn_role"]
+                    else:
+                        self._data["spawn_role"] = None
                 except Exception as e:
                     log.debug(f"Save patch failed to fetch spawn_role: {e}")
+                    self._data["spawn_role"] = None
         
         return await _original_save(self, *args, **kwargs)
     
