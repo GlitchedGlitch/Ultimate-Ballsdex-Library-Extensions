@@ -94,12 +94,12 @@ def unpatch_models_py():
     with open(MODELS_PATH, "r") as f:
         content = f.read()
     if "spawn_role" not in content:
-        return  # already clean
-    # Remove the spawn_role field definition (4-space indented lines)
+        return
+
     pattern = r'    spawn_role = models\.BigIntegerField\(\n        blank=True, null=True,\n        help_text="Discord role ID that gets mentioned in every spawn",\n    \)\n'
     new_content, count = re.subn(pattern, "", content)
     if count == 0:
-        # Fallback: try a broader pattern
+
         pattern2 = r'\n    spawn_role = models\.BigIntegerField\([^)]*\)\n'
         new_content, count = re.subn(pattern2, "\n", content, count=1)
     if count == 0:
