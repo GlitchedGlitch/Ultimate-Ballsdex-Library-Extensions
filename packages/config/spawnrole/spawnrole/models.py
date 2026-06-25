@@ -1,14 +1,13 @@
 from django.db import models
+from bd_models.models import GuildConfig
 
 
 class SpawnRole(models.Model):
-    """
-    Per-guild spawn role configuration
-    """
-
-    guild_id = models.BigIntegerField(
-        unique=True,
-        help_text="Discord guild ID this spawn role applies to.",
+    guild = models.OneToOneField(
+        GuildConfig,
+        on_delete=models.CASCADE,
+        related_name="spawn_role",
+        help_text="The guild this spawn role belongs to.",
     )
     role_id = models.BigIntegerField(
         help_text="Discord role ID to mention at the end of every spawn message.",
@@ -19,4 +18,4 @@ class SpawnRole(models.Model):
         verbose_name_plural = "Spawn Roles"
 
     def __str__(self) -> str:
-        return f"Guild {self.guild_id} → Role {self.role_id}"
+        return f"Guild {self.guild.guild_id} → Role {self.role_id}"
