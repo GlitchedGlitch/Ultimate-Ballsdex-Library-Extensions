@@ -7,7 +7,7 @@ import logging
 import discord
 
 from ballsdex.packages.countryballs.countryball import BallSpawnView
-from bd_models.models import GuildConfig
+from spawnrole.models import SpawnRole
 
 log = logging.getLogger("ballsdex.packages.spawnrole")
 
@@ -15,11 +15,9 @@ _original_spawn = BallSpawnView.spawn
 
 
 async def _fetch_spawn_role(guild_id: int) -> int | None:
-    """Fetch the configured spawn_role for a guild, or None if unset."""
-    config = await GuildConfig.objects.filter(guild_id=guild_id).afirst()
-    if config is not None and config.spawn_role:
-        return config.spawn_role
-    return None
+    """Fetch the configured spawn role for a guild from this package's own table."""
+    row = await SpawnRole.objects.filter(guild_id=guild_id).afirst()
+    return row.role_id if row else None
 
 
 class _ChannelProxy:
@@ -68,7 +66,7 @@ async def _patched_spawn(self, channel: discord.TextChannel) -> bool:
 
 def apply():
     BallSpawnView.spawn = _patched_spawn
-    log.info("Patched BallSpawnView.spawn for spawn role mentions")
+    log.info("Patched BallSpawnView.spawn for spawn role mentions (runtime-only, no core files touched)")
 
 
 def revert():
