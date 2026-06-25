@@ -95,12 +95,10 @@ def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
             "**Commands**\n"
             "• `/config spawnrole` — set or remove the spawn role\n\n"
             "**Admin Panel**\n"
-            "• Adds a standalone **Spawn Roles** section (its own table — "
-            "no core models are modified)\n\n"
+            "• Adds a standalone **Spawn Roles** section\n\n"
             "**How it works**\n"
             "This package uses its own database table and patches the spawn "
-            "function at runtime (the same technique `bd-fontchanger` uses). "
-            "No BallsDex core files are edited.\n\n"
+            "function at runtime.\n\n"
             f"**Status:** {status}"
         ),
         color=color,
@@ -140,8 +138,7 @@ def build_confirm_remove_embed() -> discord.Embed:
             "⚠️ **Are you sure?**\n\n"
             "This will remove the entry from `config/extra.toml`.\n"
             "The package will stop loading after the next rebuild.\n\n"
-            "Since this package never modified any core files, there is "
-            "nothing else to revert. The package's own `SpawnRole` table "
+            "The package's own `SpawnRole` table "
             "is kept (drop it manually in the admin panel if you want it gone)."
         ),
         color=discord.Color.orange(),
@@ -217,9 +214,6 @@ class InstallWarningView(View):
                     "Added to `config/extra.toml`.\n\n"
                     "Now rebuild and restart your bot to finish the install:\n"
                     "```\ndocker compose build --no-cache\ndocker compose up -d\n```\n"
-                    "The migration for this package's own `SpawnRole` table "
-                    "runs automatically as part of the normal migration step — "
-                    "no manual database work needed.\n\n"
                     "After the rebuild:\n"
                     "• `/config spawnrole` will be available\n"
                     "• Admin panel will show a new **Spawn Roles** section",
