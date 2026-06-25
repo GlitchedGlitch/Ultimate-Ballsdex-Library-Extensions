@@ -47,7 +47,7 @@ class _ChannelProxy:
         return await self._channel.send(content=content, **kwargs)
 
 
-async def _patched_spawn(self, channel: discord.TextChannel) -> bool:
+async def _patched_spawn(self, channel: discord.TextChannel, custom_message: str | None = None) -> bool:
     spawn_role_id = await _fetch_spawn_role(channel.guild.id)
 
     role_suffix = ""
@@ -58,15 +58,15 @@ async def _patched_spawn(self, channel: discord.TextChannel) -> bool:
             role_suffix = f" <@&{role.id}>"
 
     if not role_suffix:
-        return await _original_spawn(self, channel)
+        return await _original_spawn(self, channel, custom_message=custom_message)
 
     proxy_channel = _ChannelProxy(channel, role_suffix, spawn_role_id)
-    return await _original_spawn(self, proxy_channel)
+    return await _original_spawn(self, proxy_channel, custom_message=custom_message)
 
 
 def apply():
     BallSpawnView.spawn = _patched_spawn
-    log.info("Patched BallSpawnView.spawn for spawn role mentions (runtime-only, no core files touched)")
+    log.info("Patched BallSpawnView.spawn for spawn role mentions")
 
 
 def revert():
