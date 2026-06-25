@@ -34,15 +34,20 @@ class SpawnRoleCog(commands.Cog):
         self._attach()
 
     def _attach(self):
+
         config_cog = self.bot.cogs.get("Config")
-        if config_cog is None or not hasattr(config_cog, "config"):
+        if config_cog is None:
             log.warning(
                 "Could not find Config cog. /config spawnrole will not be registered. "
-                "Ensure the config package loads before spawnrole."
+                "Ensure the guildconfig package loads before spawnrole."
             )
             return
 
-        group = config_cog.config.app_command
+        group = getattr(config_cog, "__cog_app_commands_group__", None)
+        if group is None:
+            log.warning("Config cog has no app command group.")
+            return
+
         if group.get_command("spawnrole"):
             group.remove_command("spawnrole")
 
@@ -51,11 +56,13 @@ class SpawnRoleCog(commands.Cog):
 
     def _detach(self):
         config_cog = self.bot.cogs.get("Config")
-        if config_cog is not None and hasattr(config_cog, "config"):
-            try:
-                config_cog.config.app_command.remove_command("spawnrole")
-            except Exception:
-                pass
+        if config_cog is not None:
+            group = getattr(config_cog, "__cog_app_commands_group__", None)
+            if group:
+                try:
+                    group.remove_command("spawnrole")
+                except Exception:
+                    pass
 
     def _build_command(self) -> app_commands.Command:
         @app_commands.command(
@@ -113,3 +120,7 @@ class SpawnRoleCog(commands.Cog):
             )
 
         return spawnrole
+
+
+async def setup(bot: "BallsDexBot") -> None:
+    await bot.add_cog(SpawnRoleCog(bot))
