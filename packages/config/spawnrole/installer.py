@@ -2,7 +2,7 @@
 Spawn Role Package Installer v3 truth :3
 """
 
-import io, os, re, subprocess, traceback, discord
+import io, os, re, traceback, discord
 from discord.ui import View, Button
 
 REPO        = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
@@ -18,10 +18,7 @@ TOML_ENTRY  = (
     "enabled = true"
 )
 
-EXTRA_TOML       = "/code/admin_panel/config/extra.toml"
-MODELS_PATH      = "/opt/venv/lib/python3.14/site-packages/bd_models/models.py"
-GUILD_ADMIN_PATH = "/opt/venv/lib/python3.14/site-packages/bd_models/admin/guild.py"
-MIGRATIONS_DIR   = "/opt/venv/lib/python3.14/site-packages/bd_models/migrations"
+EXTRA_TOML = "/code/admin_panel/config/extra.toml"
 
 FOOTER         = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
 FOOTER_TIMEOUT = FOOTER + " • Timed out"
@@ -71,203 +68,6 @@ def is_installed() -> bool:
     return _toml_has_entry()
 
 
-# ── models.py patching ────────────────────────────────────────────────────────
-
-def patch_models_py():
-    """Add spawn_role field to GuildConfig in bd_models/models.py if not already present."""
-    if not os.path.isfile(MODELS_PATH):
-        raise RuntimeError(
-            f"Could not find {MODELS_PATH}.\n\n"
-            "This usually means bd_models is installed at a different path in your "
-            "image, or this container has no writable access to the venv's site-packages. "
-            "Check your docker-compose.yml `develop.watch` target paths and Python version."
-        )
-
-    with open(MODELS_PATH, "r") as f:
-        content = f.read()
-    if "spawn_role" in content:
-        return  # already patched
-
-    pattern = (
-        r'(class GuildConfig\(models\.Model\):\n'
-        r'\s+guild_id = models\.BigIntegerField\(unique=True, help_text="Discord guild ID"\)\n'
-        r'\s+spawn_channel = models\.BigIntegerField\(\s*null=True, help_text="Discord channel ID where balls will spawn"\s*\)\n)'
-    )
-    replacement = (
-        r'\1    spawn_role = models.BigIntegerField(\n'
-        r'        blank=True, null=True,\n'
-        r'        help_text="Discord role ID that gets mentioned in every spawn",\n'
-        r'    )\n'
-    )
-    new_content, count = re.subn(pattern, replacement, content)
-    if count == 0:
-        raise RuntimeError(
-            "Could not locate GuildConfig.spawn_channel field pattern in models.py. "
-            "The core models.py may have changed — manual edit required."
-        )
-    with open(MODELS_PATH, "w") as f:
-        f.write(new_content)
-
-
-def unpatch_models_py():
-    """Remove spawn_role field from GuildConfig in bd_models/models.py."""
-    if not os.path.isfile(MODELS_PATH):
-        return
-
-    with open(MODELS_PATH, "r") as f:
-        content = f.read()
-    if "spawn_role" not in content:
-        return
-
-    pattern = (
-        r'    spawn_role = models\.BigIntegerField\(\n'
-        r'        blank=True, null=True,\n'
-        r'        help_text="Discord role ID that gets mentioned in every spawn",\n'
-        r'    \)\n'
-    )
-    new_content, count = re.subn(pattern, "", content)
-    if count == 0:
-        # Fallback: looser pattern in case formatting drifted
-        pattern2 = r'\n    spawn_role = models\.BigIntegerField\([^)]*\)\n'
-        new_content, count = re.subn(pattern2, "\n", content, count=1)
-    if count == 0:
-        raise RuntimeError(
-            "Could not locate spawn_role field to remove from models.py. Manual edit required."
-        )
-    with open(MODELS_PATH, "w") as f:
-        f.write(new_content)
-
-
-# ── admin panel patching ──────────────────────────────────────────────────────
-
-def patch_guild_admin_py():
-    """Add spawn_role to GuildAdmin.list_display if not already present."""
-    with open(GUILD_ADMIN_PATH, "r") as f:
-        content = f.read()
-    if "spawn_role" in content:
-        return
-
-    pattern = r'list_display = \("guild_id", "spawn_channel", "enabled", "silent", "blacklisted"\)'
-    replacement = 'list_display = ("guild_id", "spawn_channel", "spawn_role", "enabled", "silent", "blacklisted")'
-    new_content, count = re.subn(pattern, replacement, content)
-    if count == 0:
-        raise RuntimeError(
-            "Could not locate GuildAdmin.list_display pattern in admin/guild.py. "
-            "Manual edit required."
-        )
-    with open(GUILD_ADMIN_PATH, "w") as f:
-        f.write(new_content)
-
-
-def unpatch_guild_admin_py():
-    """Remove spawn_role from GuildAdmin.list_display."""
-    with open(GUILD_ADMIN_PATH, "r") as f:
-        content = f.read()
-    if "spawn_role" not in content:
-        return
-
-    pattern = r'list_display = \("guild_id", "spawn_channel", "spawn_role", "enabled", "silent", "blacklisted"\)'
-    replacement = 'list_display = ("guild_id", "spawn_channel", "enabled", "silent", "blacklisted")'
-    new_content, count = re.subn(pattern, replacement, content)
-    if count == 0:
-        raise RuntimeError(
-            "Could not locate spawn_role in list_display to remove. Manual edit required."
-        )
-    with open(GUILD_ADMIN_PATH, "w") as f:
-        f.write(new_content)
-
-
-# ── Migration generation ──────────────────────────────────────────────────────
-
-def get_last_migration_name() -> str:
-    files = [
-        f[:-3] for f in os.listdir(MIGRATIONS_DIR)
-        if f.endswith(".py") and f != "__init__.py" and not f.startswith("__")
-    ]
-    if not files:
-        raise RuntimeError("No existing migrations found in bd_models/migrations.")
-    files.sort()
-    return files[-1]
-
-
-def get_next_migration_filename() -> str:
-    files = [
-        f for f in os.listdir(MIGRATIONS_DIR)
-        if f.endswith(".py") and f != "__init__.py"
-    ]
-    numbers = []
-    for f in files:
-        m = re.match(r"^(\d+)_", f)
-        if m:
-            numbers.append(int(m.group(1)))
-    next_num = (max(numbers) + 1) if numbers else 1
-    return f"{next_num:04d}_guildconfig_spawn_role.py"
-
-
-def get_migration_filename() -> str | None:
-    """Find the spawn_role migration file if it exists."""
-    for f in os.listdir(MIGRATIONS_DIR):
-        if f.endswith(".py") and "spawn_role" in f and f != "__init__.py":
-            return f
-    return None
-
-
-def write_migration():
-    """Generate and write the Django migration file with the correct dependency."""
-    last_migration = get_last_migration_name()
-    filename = get_next_migration_filename()
-    lines = [
-        "from django.db import migrations, models",
-        "",
-        "",
-        "class Migration(migrations.Migration):",
-        "",
-        "    dependencies = [",
-        '        ("bd_models", "%s"),' % last_migration,
-        "    ]",
-        "",
-        "    operations = [",
-        "        migrations.AddField(",
-        '            model_name="guildconfig",',
-        '            name="spawn_role",',
-        "            field=models.BigIntegerField(",
-        "                blank=True,",
-        "                null=True,",
-        '                help_text="Discord role ID that gets mentioned in every spawn",',
-        "            ),",
-        "        ),",
-        "    ]",
-        "",
-    ]
-    content = "\n".join(lines)
-    path = os.path.join(MIGRATIONS_DIR, filename)
-    if os.path.isfile(path):
-        return  # already written
-    with open(path, "w") as f:
-        f.write(content)
-
-
-def delete_migration():
-    """Delete the spawn_role migration file."""
-    filename = get_migration_filename()
-    if filename:
-        path = os.path.join(MIGRATIONS_DIR, filename)
-        if os.path.isfile(path):
-            os.remove(path)
-
-
-def run_migration():
-    """Run Django migrations for bd_models inside the admin-panel container's environment."""
-    result = subprocess.run(
-        ["python3", "-m", "django", "migrate", "bd_models", "--no-input"],
-        cwd="/code/admin_panel",
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"Migration failed:\n{result.stdout}\n{result.stderr}")
-
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _bar(current: int, total: int) -> str:
@@ -291,14 +91,16 @@ def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
     e = discord.Embed(
         title="Spawn Role Package",
         description=(
-            "Set a role to be mentioned at the end of every spawn message.\n\n"
+            "Mention a role at the end of every spawn message.\n\n"
             "**Commands**\n"
             "• `/config spawnrole` — set or remove the spawn role\n\n"
             "**Admin Panel**\n"
-            "• Adds `spawn_role` to the existing Guild Configs section\n\n"
-            "⚠️ This package patches core files (`bd_models/models.py`, "
-            "`bd_models/admin/guild.py`) and generates a database migration. "
-            "It is more invasive than typical packages.\n\n"
+            "• Adds a standalone **Spawn Roles** section (its own table — "
+            "no core models are modified)\n\n"
+            "**How it works**\n"
+            "This package uses its own database table and patches the spawn "
+            "function at runtime (the same technique `bd-fontchanger` uses). "
+            "No BallsDex core files are edited.\n\n"
             f"**Status:** {status}"
         ),
         color=color,
@@ -311,25 +113,19 @@ def build_warning_embed() -> discord.Embed:
     e = discord.Embed(
         title="⚠️ Before Installing — Required Setup",
         description=(
-            "This installer needs to write to `config/extra.toml` and directly "
-            "patch `bd_models/models.py` and `bd_models/admin/guild.py` **inside "
-            "this bot container's filesystem**.\n\n"
-            "⚠️ **Important limitation:** in a typical multi-container setup, "
-            "`bot`, `admin-panel`, and `migration` are **separate containers**, "
-            "each with their own copy of `bd_models`. A patch applied from inside "
-            "the `bot` container only affects that container — it will **not** "
-            "automatically reach `admin-panel` or `migration` unless your "
-            "`docker-compose.yml` mounts `./admin_panel` as a shared volume "
-            "across all three services.\n\n"
-            "**Check your `docker-compose.yml`:** if `admin_panel` (or wherever "
-            "`bd_models` lives) is only baked into the image and not bind-mounted "
-            "from your host into all three services, you'll need to patch it "
-            "manually on the host and rebuild, rather than relying on this "
-            "installer's runtime patch.\n\n"
-            "**If you do have a shared mount**, make sure it and `config`/`extra` "
-            "allow write access (`rw`, not `ro`) across all services, then run:\n"
+            "The installer needs to write to `config/extra.toml`. "
+            "By default Docker mounts this folder as **read-only**, "
+            "so you must edit your `docker-compose.yml` first.\n\n"
+            "**Find these two lines** in both the `bot` and `admin-panel` services "
+            "and change `:ro` to `:rw`:\n"
+            "```yaml\n"
+            "- \"./config:/code/admin_panel/config:rw\"\n"
+            "- \"./extra:/code/extra:rw\"\n"
+            "```\n"
+            "Then restart your containers:\n"
             "```\ndocker compose down\ndocker compose build --no-cache\ndocker compose up -d\n```\n\n"
-            "Once ready, click **Confirm Install** below."
+            "Once done, click **Confirm Install** below.\n"
+            "If you have already done this, you can proceed immediately."
         ),
         color=discord.Color.orange(),
     )
@@ -342,13 +138,11 @@ def build_confirm_remove_embed() -> discord.Embed:
         title="Remove Spawn Role Package",
         description=(
             "⚠️ **Are you sure?**\n\n"
-            "This will:\n"
-            "• Remove the entry from `config/extra.toml`\n"
-            "• Revert the patch to `bd_models/models.py`\n"
-            "• Revert the patch to `bd_models/admin/guild.py`\n"
-            "• Delete the generated migration file\n\n"
-            "The `spawn_role` database column is **kept** to avoid data loss — "
-            "rebuild to apply the code reverts."
+            "This will remove the entry from `config/extra.toml`.\n"
+            "The package will stop loading after the next rebuild.\n\n"
+            "Since this package never modified any core files, there is "
+            "nothing else to revert. The package's own `SpawnRole` table "
+            "is kept (drop it manually in the admin panel if you want it gone)."
         ),
         color=discord.Color.orange(),
     )
@@ -396,14 +190,7 @@ class InstallWarningView(View):
     @discord.ui.button(label="Confirm Install", style=discord.ButtonStyle.success, emoji="✅")
     async def confirm_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
-
-        steps = [
-            ("Patching bd_models/models.py", None),
-            ("Patching admin/guild.py", None),
-            ("Writing migration", None),
-            ("Running migration", None),
-            ("Writing to config/extra.toml", None),
-        ]
+        steps = [("Writing to config/extra.toml", None)]
 
         async def update(i: int, success: bool = True):
             steps[i] = (steps[i][0], success)
@@ -418,21 +205,8 @@ class InstallWarningView(View):
         )
 
         try:
-            patch_models_py()
-            await update(0)
-
-            patch_guild_admin_py()
-            await update(1)
-
-            write_migration()
-            await update(2)
-
-            run_migration()
-            await update(3)
-
             _write_toml()
-            await update(4)
-
+            await update(0)
             self.parent.installed = True
             self.parent._update_buttons()
             self.parent.done = True
@@ -440,12 +214,15 @@ class InstallWarningView(View):
             await self.parent.message.edit(
                 embed=build_result_embed(
                     "Entry Added — Rebuild Required",
-                    "All patches applied and the migration has been run.\n\n"
+                    "Added to `config/extra.toml`.\n\n"
                     "Now rebuild and restart your bot to finish the install:\n"
                     "```\ndocker compose build --no-cache\ndocker compose up -d\n```\n"
+                    "The migration for this package's own `SpawnRole` table "
+                    "runs automatically as part of the normal migration step — "
+                    "no manual database work needed.\n\n"
                     "After the rebuild:\n"
                     "• `/config spawnrole` will be available\n"
-                    "• Admin panel → Guild Configs will show the Spawn Role column",
+                    "• Admin panel will show a new **Spawn Roles** section",
                     discord.Color.green(),
                 ),
                 view=None,
@@ -453,16 +230,13 @@ class InstallWarningView(View):
         except OSError as e:
             self.parent.done = True
             self.stop()
-            for i, (label, state) in enumerate(steps):
-                if state is None:
-                    steps[i] = (label, False)
-                    break
+            steps[0] = (steps[0][0], False)
             await self.parent.message.edit(
                 embed=build_result_embed(
                     "Permission Denied",
-                    f"Could not write to a required file (`{e.strerror}`).\n\n"
-                    "Make sure `docker-compose.yml` mounts are `rw` and the containers "
-                    "were restarted:\n"
+                    f"Could not write to `config/extra.toml` — the folder is still **read-only** (`{e.strerror}`).\n\n"
+                    "Make sure you edited `docker-compose.yml` and restarted the containers first:\n"
+                    "```yaml\n- \"./config:/code/admin_panel/config:rw\"\n- \"./extra:/code/extra:rw\"\n```\n"
                     "```\ndocker compose down\ndocker compose build --no-cache\ndocker compose up -d\n```\n"
                     "Then run the installer eval again.",
                     discord.Color.red(),
@@ -473,10 +247,7 @@ class InstallWarningView(View):
             err = traceback.format_exc()
             self.parent.done = True
             self.stop()
-            for i, (label, state) in enumerate(steps):
-                if state is None:
-                    steps[i] = (label, False)
-                    break
+            steps[0] = (steps[0][0], False)
             await self.parent.message.edit(embed=build_error_embed("installing", err), view=None)
             await interaction.followup.send(
                 file=discord.File(io.BytesIO(err.encode()), filename="install_error.txt")
@@ -514,39 +285,8 @@ class ConfirmRemoveView(View):
     @discord.ui.button(label="Yes, remove it", style=discord.ButtonStyle.danger, emoji="🗑️")
     async def confirm_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.defer()
-
-        steps = [
-            ("Removing from config/extra.toml", None),
-            ("Reverting models.py patch", None),
-            ("Reverting admin/guild.py patch", None),
-            ("Deleting migration file", None),
-        ]
-
-        async def update(i: int, success: bool = True):
-            steps[i] = (steps[i][0], success)
-            await self.parent.message.edit(
-                embed=_progress_embed("Removing Spawn Role Package…", steps, discord.Color.red()),
-                view=None,
-            )
-
-        await self.parent.message.edit(
-            embed=_progress_embed("Removing Spawn Role Package…", steps, discord.Color.red()),
-            view=None,
-        )
-
         try:
             _remove_toml()
-            await update(0)
-
-            unpatch_models_py()
-            await update(1)
-
-            unpatch_guild_admin_py()
-            await update(2)
-
-            delete_migration()
-            await update(3)
-
             self.parent.installed = False
             self.parent._update_buttons()
             self.parent.done = True
@@ -554,9 +294,8 @@ class ConfirmRemoveView(View):
             await self.parent.message.edit(
                 embed=build_result_embed(
                     "Entry Removed",
-                    "All patches reverted and migration file deleted.\n\n"
-                    "The `spawn_role` database column was **kept** to avoid data loss.\n\n"
-                    "Rebuild to fully apply:\n"
+                    "Removed from `config/extra.toml`.\n\n"
+                    "Rebuild to fully uninstall:\n"
                     "```\ndocker compose build --no-cache\ndocker compose up -d\n```",
                     discord.Color.red(),
                 ),
@@ -566,10 +305,6 @@ class ConfirmRemoveView(View):
             err = traceback.format_exc()
             self.parent.done = True
             self.stop()
-            for i, (label, state) in enumerate(steps):
-                if state is None:
-                    steps[i] = (label, False)
-                    break
             await self.parent.message.edit(embed=build_error_embed("removing", err), view=None)
             await interaction.followup.send(
                 file=discord.File(io.BytesIO(err.encode()), filename="remove_error.txt")
