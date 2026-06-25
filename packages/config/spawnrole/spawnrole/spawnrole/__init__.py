@@ -22,4 +22,3 @@ async def teardown(bot: "BallsDexBot") -> None:
     cog = bot.cogs.get("SpawnRoleCog")
     if cog is not None and hasattr(cog, "_detach"):
         cog._detach()
-      
