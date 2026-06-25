@@ -44,6 +44,18 @@ GuildAdmin.inlines = tuple(
     if getattr(inline, "model", None) is not SpawnRole
 )
 
+def _spawn_role_display(self, obj):
+    try:
+        if hasattr(obj, "spawn_role_data") and obj.spawn_role_data:
+            return str(obj.spawn_role_data.role_id)
+    except (AttributeError, SpawnRole.DoesNotExist):
+        pass
+    return "-"
+
+_spawn_role_display.short_description = "Spawn role"  # type: ignore
+
+GuildAdmin.spawn_role = _spawn_role_display  # type: ignore
+
 GuildAdmin.form = GuildConfigWithSpawnRoleForm
 
 GuildAdmin.fieldsets = (
