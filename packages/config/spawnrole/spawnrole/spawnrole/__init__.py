@@ -9,13 +9,10 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("ballsdex.packages.spawnrole")
 
-
 async def setup(bot: "BallsDexBot") -> None:
     spawn_patch.apply()
-    cog = SpawnRoleCog(bot)
-    await bot.add_cog(cog)
+    await bot.add_cog(SpawnRoleCog(bot))
     log.info("SpawnRoleCog loaded")
-
 
 async def teardown(bot: "BallsDexBot") -> None:
     spawn_patch.revert()
