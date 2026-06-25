@@ -2,6 +2,7 @@
 this is where magic happens :3
 """
 
+import inspect
 import logging
 
 import discord
@@ -12,6 +13,8 @@ from bd_models.models import GuildConfig
 log = logging.getLogger("ballsdex.packages.spawnrole")
 
 _original_spawn = BallSpawnView.spawn
+
+_spawn_accepts_custom_message = "custom_message" in inspect.signature(_original_spawn).parameters
 
 
 async def _fetch_spawn_role(guild_id: int) -> int | None:
@@ -57,10 +60,18 @@ async def _patched_spawn(self, channel: discord.TextChannel, custom_message: str
             role_suffix = f" <@&{role.id}>"
 
     if not role_suffix:
-        return await _original_spawn(self, channel, custom_message=custom_message)
+
+        if _spawn_accepts_custom_message:
+            return await _original_spawn(self, channel, custom_message=custom_message)
+        else:
+            return await _original_spawn(self, channel)
 
     proxy_channel = _ChannelProxy(channel, role_suffix, spawn_role_id)
-    return await _original_spawn(self, proxy_channel, custom_message=custom_message)
+    
+    if _spawn_accepts_custom_message:
+        return await _original_spawn(self, proxy_channel, custom_message=custom_message)
+    else:
+        return await _original_spawn(self, proxy_channel)
 
 
 def apply():
