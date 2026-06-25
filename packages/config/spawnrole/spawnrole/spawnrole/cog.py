@@ -11,6 +11,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bd_models.models import GuildConfig
 from settings.models import settings
 from spawnrole.models import SpawnRole
 
@@ -22,8 +23,8 @@ log = logging.getLogger("ballsdex.packages.spawnrole")
 
 async def get_spawn_role_id(guild_id: int) -> int | None:
     """Look up the configured spawn role for a guild, or None if unset."""
-    row = await SpawnRole.objects.filter(guild_id=guild_id).afirst()
-    return row.role_id if row else None
+    config = await GuildConfig.objects.filter(guild_id=guild_id).select_related("spawn_role").afirst()
+    return config.spawn_role.role_id if config and hasattr(config, "spawn_role") and config.spawn_role else None
 
 
 class SpawnRoleCog(commands.Cog):
@@ -34,7 +35,6 @@ class SpawnRoleCog(commands.Cog):
         self._attach()
 
     def _attach(self):
-
         config_cog = self.bot.cogs.get("Config")
         if config_cog is None:
             log.warning(
@@ -85,7 +85,8 @@ class SpawnRoleCog(commands.Cog):
             current_role_id = await get_spawn_role_id(guild_id)
 
             if remove or (role and current_role_id == role.id):
-                await SpawnRole.objects.filter(guild_id=guild_id).adelete()
+                
+                await SpawnRole.objects.filter(guild__guild_id=guild_id).adelete()
 
                 if current_role_id:
                     await interaction.response.send_message(
@@ -108,8 +109,9 @@ class SpawnRoleCog(commands.Cog):
                 )
                 return
 
+            config, _ = await GuildConfig.objects.aget_or_create(guild_id=guild_id)
             await SpawnRole.objects.aupdate_or_create(
-                guild_id=guild_id, defaults={"role_id": role.id}
+                guild=config, defaults={"role_id": role.id}
             )
 
             await interaction.response.send_message(
