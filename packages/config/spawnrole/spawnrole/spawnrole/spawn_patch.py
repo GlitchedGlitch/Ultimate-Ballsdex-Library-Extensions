@@ -15,9 +15,8 @@ _original_spawn = BallSpawnView.spawn
 
 
 async def _fetch_spawn_role(guild_id: int) -> int | None:
-    """Fetch the configured spawn role for a guild using the OneToOne relation."""
-    config = await GuildConfig.objects.filter(guild_id=guild_id).select_related("spawn_role").afirst()
-    return config.spawn_role.role_id if config and hasattr(config, "spawn_role") and config.spawn_role else None
+    config = await GuildConfig.objects.filter(guild_id=guild_id).select_related("spawn_role_data").afirst()
+    return config.spawn_role_data.role_id if config and hasattr(config, "spawn_role_data") and config.spawn_role_data else None
 
 
 class _ChannelProxy:
