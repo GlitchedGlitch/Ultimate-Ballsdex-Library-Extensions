@@ -1,10 +1,14 @@
 from django.contrib import admin
-
+from bd_models.admin.guild import GuildConfigAdmin
 from .models import SpawnRole
 
 
-@admin.register(SpawnRole)
-class SpawnRoleAdmin(admin.ModelAdmin):
-    list_display = ("guild_id", "role_id")
-    search_fields = ("guild_id", "role_id")
-    ordering = ("guild_id",)
+class SpawnRoleInline(admin.StackedInline):
+    model = SpawnRole
+    can_delete = False
+    verbose_name_plural = "Spawn Role"
+    fields = ("role_id",)
+    extra = 0
+
+if SpawnRoleInline not in getattr(GuildConfigAdmin, "inlines", []):
+    GuildConfigAdmin.inlines = list(getattr(GuildConfigAdmin, "inlines", [])) + [SpawnRoleInline]
