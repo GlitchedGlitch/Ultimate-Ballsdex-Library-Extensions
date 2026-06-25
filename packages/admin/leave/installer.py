@@ -118,7 +118,7 @@ def build_warning_embed() -> discord.Embed:
             "- \"./extra:/code/extra:rw\"\n"
             "```\n"
             "Then restart your containers:\n"
-            "```\ndocker compose down\ndocker compose build --no-cache\ndocker compose up -d\n```\n\n"
+            "```\ndocker compose down\ndocker compose build\ndocker compose up -d\n```\n\n"
             "Once done, click **Confirm Install** below.\n"
             "If you have already done this, you can proceed immediately."
         ),
@@ -208,7 +208,7 @@ class InstallWarningView(View):
                     "Entry Added — Rebuild Required",
                     "Added to `config/extra.toml`.\n\n"
                     "Now rebuild and restart your bot to finish the install:\n"
-                    "```\ndocker compose build --no-cache\ndocker compose up -d\n```\n"
+                    "```\ndocker compose build\ndocker compose up -d\n```\n"
                     "After the rebuild, and also after running `[p].admin syncslash`, `/admin leave_server` will be available.",
                     discord.Color.green(),
                 ),
@@ -224,7 +224,7 @@ class InstallWarningView(View):
                     f"Could not write to `config/extra.toml` — the folder is still **read-only** (`{e.strerror}`).\n\n"
                     "Make sure you edited `docker-compose.yml` and restarted the containers first:\n"
                     "```yaml\n- \"./config:/code/admin_panel/config:rw\"\n- \"./extra:/code/extra:rw\"\n```\n"
-                    "```\ndocker compose down\ndocker compose build --no-cache\ndocker compose up -d\n```\n"
+                    "```\ndocker compose down\ndocker compose build\ndocker compose up -d\n```\n"
                     "Then run the installer eval again.",
                     discord.Color.red(),
                 ),
@@ -283,7 +283,7 @@ class ConfirmRemoveView(View):
                     "Entry Removed",
                     "Removed from `config/extra.toml`.\n\n"
                     "Rebuild to fully uninstall:\n"
-                    "```\ndocker compose build --no-cache\ndocker compose up -d\n```",
+                    "```\ndocker compose build\ndocker compose up -d\n```",
                     discord.Color.red(),
                 ),
                 view=None,
