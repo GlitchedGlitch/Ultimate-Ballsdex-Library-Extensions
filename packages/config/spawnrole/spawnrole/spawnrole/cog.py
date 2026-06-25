@@ -22,9 +22,8 @@ log = logging.getLogger("ballsdex.packages.spawnrole")
 
 
 async def get_spawn_role_id(guild_id: int) -> int | None:
-    """Look up the configured spawn role for a guild, or None if unset."""
-    config = await GuildConfig.objects.filter(guild_id=guild_id).select_related("spawn_role").afirst()
-    return config.spawn_role.role_id if config and hasattr(config, "spawn_role") and config.spawn_role else None
+    config = await GuildConfig.objects.filter(guild_id=guild_id).select_related("spawn_role_data").afirst()
+    return config.spawn_role_data.role_id if config and hasattr(config, "spawn_role_data") and config.spawn_role_data else None
 
 
 class SpawnRoleCog(commands.Cog):
@@ -85,7 +84,6 @@ class SpawnRoleCog(commands.Cog):
             current_role_id = await get_spawn_role_id(guild_id)
 
             if remove or (role and current_role_id == role.id):
-                
                 await SpawnRole.objects.filter(guild__guild_id=guild_id).adelete()
 
                 if current_role_id:
