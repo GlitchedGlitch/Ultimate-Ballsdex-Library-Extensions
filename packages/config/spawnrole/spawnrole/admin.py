@@ -1,32 +1,50 @@
+from django import forms
 from django.contrib import admin
 from bd_models.admin.guild import GuildAdmin
 from bd_models.models import GuildConfig
 from .models import SpawnRole
 
-def _get_spawn_role(self):
-    try:
-        return self.spawn_role_data.role_id
-    except (AttributeError, SpawnRole.DoesNotExist):
-        return None
-
-def _set_spawn_role(self, value):
-    if value is None or value == "":
-        SpawnRole.objects.filter(guild=self).delete()
-    else:
-        try:
-            value = int(value)
-            SpawnRole.objects.update_or_create(guild=self, defaults={"role_id": value})
-        except (ValueError, TypeError):
-            pass
-
-if not hasattr(GuildConfig, "_spawn_role_patched"):
-    GuildConfig.spawn_role = property(_get_spawn_role, _set_spawn_role)
-    GuildConfig._spawn_role_patched = True
+class GuildConfigWithSpawnRoleForm(forms.ModelForm):
+    spawn_role = forms.CharField(
+        required=False,
+        label="Spawn role",
+        help_text="Discord role ID that gets mentioned in every spawn",
+    )
+    
+    class Meta:
+        model = GuildConfig
+        fields = "__all__"
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance and self.instance.pk:
+            try:
+                if hasattr(self.instance, "spawn_role_data") and self.instance.spawn_role_data:
+                    self.fields["spawn_role"].initial = str(self.instance.spawn_role_data.role_id)
+            except (AttributeError, SpawnRole.DoesNotExist):
+                self.fields["spawn_role"].initial = ""
+    
+    def save(self, commit=True):
+        instance = super().save(commit=commit)
+        role_id = self.cleaned_data.get("spawn_role")
+        
+        if role_id:
+            try:
+                role_id = int(role_id)
+                SpawnRole.objects.update_or_create(guild=instance, defaults={"role_id": role_id})
+            except (ValueError, TypeError):
+                pass
+        else:
+            SpawnRole.objects.filter(guild=instance).delete()
+        
+        return instance
 
 GuildAdmin.inlines = tuple(
     inline for inline in getattr(GuildAdmin, "inlines", [])
     if getattr(inline, "model", None) is not SpawnRole
 )
+
+GuildAdmin.form = GuildConfigWithSpawnRoleForm
 
 GuildAdmin.fieldsets = (
     (None, {
