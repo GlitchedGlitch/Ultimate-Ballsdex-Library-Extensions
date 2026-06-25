@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ballsdex-spawnrole"
-version = "1.0.0"
+version = "1.1.0-pre"
 description = "Spawn role package that allows server managers to set a role that gets pinged every time a ball spawns. Farmers will increase :sob:"
 license = "MIT"
 authors = [{ name = "Glitch" }]
