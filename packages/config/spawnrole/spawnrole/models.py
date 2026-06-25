@@ -6,7 +6,7 @@ class SpawnRole(models.Model):
     guild = models.OneToOneField(
         GuildConfig,
         on_delete=models.CASCADE,
-        related_name="spawn_role",
+        related_name="spawn_role_data",
         help_text="The guild this spawn role belongs to.",
     )
     role_id = models.BigIntegerField(
