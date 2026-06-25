@@ -11,13 +11,19 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from bd_models.models import GuildConfig
 from settings.models import settings
+from spawnrole.models import SpawnRole
 
 if TYPE_CHECKING:
     from ballsdex.core.bot import BallsDexBot
 
 log = logging.getLogger("ballsdex.packages.spawnrole")
+
+
+async def get_spawn_role_id(guild_id: int) -> int | None:
+    """Look up the configured spawn role for a guild, or None if unset."""
+    row = await SpawnRole.objects.filter(guild_id=guild_id).afirst()
+    return row.role_id if row else None
 
 
 class SpawnRoleCog(commands.Cog):
@@ -52,8 +58,6 @@ class SpawnRoleCog(commands.Cog):
                 pass
 
     def _build_command(self) -> app_commands.Command:
-        bot = self.bot
-
         @app_commands.command(
             name="spawnrole",
             description="Mention a role in each spawn",
@@ -71,14 +75,10 @@ class SpawnRoleCog(commands.Cog):
             guild_id = interaction.guild_id
             assert guild_id
 
-            config, _ = await GuildConfig.objects.aget_or_create(
-                guild_id=guild_id, defaults={"guild_id": guild_id}
-            )
-            current_role_id = config.spawn_role
+            current_role_id = await get_spawn_role_id(guild_id)
 
             if remove or (role and current_role_id == role.id):
-                config.spawn_role = None
-                await config.asave(update_fields=("spawn_role",))
+                await SpawnRole.objects.filter(guild_id=guild_id).adelete()
 
                 if current_role_id:
                     await interaction.response.send_message(
@@ -101,8 +101,9 @@ class SpawnRoleCog(commands.Cog):
                 )
                 return
 
-            config.spawn_role = role.id
-            await config.asave(update_fields=("spawn_role",))
+            await SpawnRole.objects.aupdate_or_create(
+                guild_id=guild_id, defaults={"role_id": role.id}
+            )
 
             await interaction.response.send_message(
                 f"{settings.bot_name} will now alert "
