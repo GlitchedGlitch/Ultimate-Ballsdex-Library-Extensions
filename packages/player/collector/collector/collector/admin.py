@@ -12,7 +12,6 @@ from discord import app_commands
 from discord.ext import commands
 
 from ballsdex.core.utils import checks
-from ballsdex.core.utils.menus import Menu, TextFormatter
 from bd_models.models import Ball, Special
 from collector.models import CollectorClaim, CollectorRequirement
 from settings.models import settings
@@ -186,64 +185,6 @@ class BulkAddButtonView(discord.ui.View):
         await interaction.response.send_modal(BulkAddModal())
 
 
-# ── Helper: build paginated list ─────────────────────────────────────────────
-
-async def _build_collector_list(
-    bot: "BallsDexBot",
-    special: str | None = None,
-    reverse: bool = False,
-) -> tuple[discord.ui.LayoutView, Menu] | tuple[None, None]:
-    """Build the paginated collector list view. Returns (view, menu)."""
-    from .cog import ChunkedCollectorSource, _ball_emoji
-
-    qs = CollectorRequirement.objects.select_related("ball", "special")
-    if special:
-        qs = qs.filter(special__name__iexact=special.strip())
-    qs = qs.order_by(
-        "-amount" if reverse else "amount",
-        "ball__country",
-    )
-
-    all_reqs = [r async for r in qs.aiterator()]
-    if not all_reqs:
-        return None, None
-
-    entries: list[tuple[str, int]] = []
-    for r in all_reqs:
-        emoji = _ball_emoji(bot, r.ball_id)
-        if special:
-            line = f"⋄ {emoji} {r.ball.country}"
-        else:
-            line = f"⋄ {emoji} {r.ball.country} -> *{r.special.name}*"
-        entries.append((line, r.amount))
-
-    title = f'"{special.strip()}" Collector List' if special else "Collector List"
-
-    view = discord.ui.LayoutView()
-    container = discord.ui.Container()
-
-    header = discord.ui.Section(
-        discord.ui.TextDisplay(f"# {title}"),
-        accessory=discord.ui.Thumbnail(
-            bot.user.display_avatar.url if bot.user else ""
-        ),
-    )
-    container.add_item(header)
-    container.add_item(discord.ui.Separator())
-
-    text_display = discord.ui.TextDisplay("")
-    container.add_item(text_display)
-    view.add_item(container)
-
-    source = ChunkedCollectorSource(entries, max_blocks_per_page=7, max_lines_per_page=18)
-    formatter = TextFormatter(text_display)
-
-    menu = Menu(bot, view, source, formatter)
-    await menu.init(container=container)
-
-    return view, menu
-
-
 # ── Command group ─────────────────────────────────────────────────────────────
 
 @commands.hybrid_group()
@@ -253,39 +194,6 @@ async def collector(ctx: commands.Context["BallsDexBot"]):
     Collector requirement management.
     """
     await ctx.send_help(ctx.command)
-
-
-@collector.command(name="list")
-@checks.is_staff()
-@app_commands.describe(
-    special="Filter by special name",
-    reverse="Reverse the output of the list",
-)
-async def collector_list(
-    ctx: commands.Context["BallsDexBot"],
-    special: str | None = None,
-    reverse: bool = False,
-):
-    """
-    List all active collector requirements.
-
-    Flags:
-      special
-        Filter by special name.
-      reverse
-        Reverse the output of the list.
-    """
-    view, menu = await _build_collector_list(ctx.bot, special, reverse)
-    if view is None:
-        msg = (
-            f"No requirements found for special `{special}`."
-            if special
-            else "There are no collector requirements set up yet."
-        )
-        await ctx.send(msg, ephemeral=_ephemeral(ctx))
-        return
-
-    await ctx.send(view=view, ephemeral=_ephemeral(ctx))
 
 
 @collector.command(name="set")
