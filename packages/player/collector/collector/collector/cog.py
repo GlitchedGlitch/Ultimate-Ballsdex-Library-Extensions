@@ -13,6 +13,7 @@ from discord import app_commands
 from discord.ext import commands
 from discord.ui import Modal, TextInput
 
+from ballsdex.core.utils.menus import Menu, TextSource, TextFormatter
 from bd_models.models import Ball, BallInstance, Player, balls as balls_cache
 from collector.models import CollectorClaim, CollectorRequirement
 from settings.models import settings
@@ -22,7 +23,6 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("ballsdex.packages.collector")
 Interaction = discord.Interaction["BallsDexBot"]
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -34,7 +34,6 @@ def _ball_emoji(bot: "BallsDexBot", ball_id: int) -> str:
             return str(emoji)
     return "•"
 
-
 async def _get_reqs(ball_id: int) -> list[CollectorRequirement]:
     return [
         r async for r in
@@ -44,18 +43,15 @@ async def _get_reqs(ball_id: int) -> list[CollectorRequirement]:
         .aiterator()
     ]
 
-
 async def _has_claimed(player: Player, req: CollectorRequirement) -> bool:
     return await CollectorClaim.objects.filter(
         player=player, requirement=req
     ).aexists()
 
-
 async def _count_owned(player: Player, ball_id: int) -> int:
     return await BallInstance.objects.filter(
         player=player, ball_id=ball_id, deleted=False
     ).acount()
-
 
 # ── Claim helpers ─────────────────────────────────────────────────────────────
 
@@ -98,7 +94,6 @@ async def _do_claim(
         ephemeral=True,
     )
 
-
 class ClaimSelectView(discord.ui.View):
     """Shown when a player qualifies for multiple rewards on the same ball."""
 
@@ -140,7 +135,6 @@ class ClaimSelectView(discord.ui.View):
             await self.original.edit_original_response(view=self)
         except Exception:
             pass
-
 
 # ── Bulk modal ────────────────────────────────────────────────────────────────
 
@@ -246,7 +240,6 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
                 f"Errors: {len(errors)}",
                 extra={"webhook": True},
             )
-
 
 # ── Player cog ────────────────────────────────────────────────────────────────
 
@@ -358,9 +351,9 @@ class CollectorCog(commands.GroupCog, name="collector"):
                 lines.extend(in_progress[:20])
                 if len(in_progress) > 20:
                     lines.append(f"*...and {len(in_progress) - 20} more*")
-            lines.append(
-                f"\nUse `/collector claim {settings.collectible_name}:` to claim a specific ball."
-            )
+                lines.append(
+                    f"\nUse `/collector claim {settings.collectible_name}:` to claim a specific ball."
+                )
             await interaction.followup.send("\n".join(lines), ephemeral=True)
             return
 
@@ -461,49 +454,53 @@ class CollectorCog(commands.GroupCog, name="collector"):
             await interaction.followup.send(msg, ephemeral=True)
             return
 
+        lines: list[str] = []
+        current_amount: int | None = None
         
-        grouped: dict[int, list[CollectorRequirement]] = defaultdict(list)
         for r in all_reqs:
-            grouped[r.amount].append(r)
+            emoji = _ball_emoji(self.bot, r.ball_id)
+            if special:
+                line = f"• {emoji} {r.ball.country}"
+            else:
+                line = f"• {emoji} {r.ball.country} → *{r.special.name}*"
+            
+            if r.amount != current_amount:
+                if lines:
+                    lines.append("")
+                lines.append(f"**Minimum: {r.amount:,}**")
+                current_amount = r.amount
+            
+            lines.append(line)
 
-        
-        entries: list[tuple[str, str]] = []
-        for amount in grouped:
-            chunk_lines: list[str] = []
-            chunk_num = 1
-            for r in grouped[amount]:
-                emoji = _ball_emoji(self.bot, r.ball_id)
-                line = (
-                    f"* {emoji} {r.ball.country}"
-                    if special
-                    else f"* {emoji} {r.ball.country} → *{r.special.name}*"
-                )
-                if chunk_lines and len("\n".join(chunk_lines + [line])) > 800:
-                    header = f"**Minimum: {amount:,}**" if chunk_num == 1 else "\u200b"
-                    entries.append((header, "\n".join(chunk_lines)))
-                    chunk_lines = []
-                    chunk_num += 1
-                chunk_lines.append(line)
-            if chunk_lines:
-                header = f"**Minimum: {amount:,}**" if chunk_num == 1 else "\u200b"
-                entries.append((header, "\n".join(chunk_lines)))
-
-        
-        pages: list[discord.Embed] = []
-        FIELDS_PER_PAGE = 3
+        full_text = "\n".join(lines)
         title = f'"{special.strip()}" Collector List' if special else "Collector List"
-        for i in range(0, len(entries), FIELDS_PER_PAGE):
-            chunk = entries[i : i + FIELDS_PER_PAGE]
-            embed = discord.Embed(title=title, color=discord.Color.gold())
-            for name, value in chunk:
-                embed.add_field(name=name, value=value, inline=False)
-            pages.append(embed)
+        
+        header = discord.ui.Section(
+            discord.ui.TextDisplay(f"# {title}"),
+            accessory=discord.ui.Thumbnail(url=self.bot.user.display_avatar.url if self.bot.user else ""),
+        )
 
-        total = len(pages)
-        for i, embed in enumerate(pages, 1):
-            if total > 1:
-                embed.set_footer(text=f"Page {i}/{total}")
-            await interaction.followup.send(embed=embed, ephemeral=True)
+        view = discord.ui.LayoutView()
+        container = discord.ui.Container()
+        container.add_item(header)
+        container.add_item(discord.ui.Separator())
+        view.add_item(container)
+
+        text_display = discord.ui.TextDisplay("Loading...")
+        container.add_item(text_display)
+
+        source = TextSource(
+            full_text,
+            page_length=3500,
+            prefix="",
+            suffix="",
+        )
+        formatter = TextFormatter(text_display)
+        
+        menu = Menu(self.bot, view, source, formatter)
+        await menu.init(container=container)
+
+        await interaction.followup.send(view=view)
 
     @list.autocomplete("special")
     async def list_special_autocomplete(
