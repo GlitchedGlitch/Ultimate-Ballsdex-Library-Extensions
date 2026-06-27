@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("ballsdex.packages.admin.collector")
 
+
 # ── Converters ───────────────────────────────────────────────────────────────
 
 class BallConverter(commands.Converter):
@@ -131,7 +132,14 @@ async def _special_with_req_autocomplete(
     return results
 
 
-# ── Bulk modal ─────────────────────────────────────────────────────────────────
+# ── Helper: ephemeral for slash, public for prefix ───────────────────────────
+
+def _ephemeral(ctx: commands.Context) -> bool:
+    """Return True for slash commands, False for prefix commands."""
+    return ctx.interaction is not None
+
+
+# ── Bulk modal ───────────────────────────────────────────────────────────────
 
 class BulkAddModal(discord.ui.Modal, title="Bulk Add Collector Requirements"):
     requirements_input = discord.ui.TextInput(
@@ -178,13 +186,13 @@ class BulkAddButtonView(discord.ui.View):
         await interaction.response.send_modal(BulkAddModal())
 
 
-# ── Helper: build paginated list ───────────────────────────────────────────────
+# ── Helper: build paginated list ─────────────────────────────────────────────
 
 async def _build_collector_list(
     bot: "BallsDexBot",
     special: str | None = None,
     reverse: bool = False,
-) -> tuple[discord.ui.LayoutView, Menu]:
+) -> tuple[discord.ui.LayoutView, Menu] | tuple[None, None]:
     """Build the paginated collector list view. Returns (view, menu)."""
     from .cog import ChunkedCollectorSource, _ball_emoji
 
@@ -198,7 +206,7 @@ async def _build_collector_list(
 
     all_reqs = [r async for r in qs.aiterator()]
     if not all_reqs:
-        return None, None  # type: ignore
+        return None, None
 
     entries: list[tuple[str, int]] = []
     for r in all_reqs:
@@ -236,7 +244,7 @@ async def _build_collector_list(
     return view, menu
 
 
-# ── Command group ──────────────────────────────────────────────────────────────
+# ── Command group ─────────────────────────────────────────────────────────────
 
 @commands.hybrid_group()
 @checks.is_staff()
@@ -274,10 +282,10 @@ async def collector_list(
             if special
             else "There are no collector requirements set up yet."
         )
-        await ctx.send(msg)
+        await ctx.send(msg, ephemeral=_ephemeral(ctx))
         return
 
-    await ctx.send(view=view)
+    await ctx.send(view=view, ephemeral=_ephemeral(ctx))
 
 
 @collector.command(name="set")
@@ -307,7 +315,7 @@ async def collector_set(
         The special reward applied to the claimed collector ball.
     """
     if not (1 <= amount <= 9999):
-        await ctx.send("Amount must be between 1 and 9999.")
+        await ctx.send("Amount must be between 1 and 9999.", ephemeral=_ephemeral(ctx))
         return
 
     _, created = await CollectorRequirement.objects.aupdate_or_create(
@@ -318,7 +326,8 @@ async def collector_set(
     action = "Created" if created else "Updated"
     await ctx.send(
         f"{action} collector requirement: **{countryball.country}** — "
-        f"own ≥ **{amount:,}** → **{special.name}**."
+        f"own ≥ **{amount:,}** → **{special.name}**.",
+        ephemeral=_ephemeral(ctx),
     )
     log.info(
         f"{ctx.author} set collector requirement for {countryball.country} "
@@ -335,6 +344,9 @@ async def collector_bulk(ctx: commands.Context["BallsDexBot"]):
 
     Click the button below to open the bulk add form.
     """
+    if ctx.interaction is not None:
+        await ctx.interaction.response.send_modal(BulkAddModal())
+        return
     view = BulkAddButtonView(ctx)
     await ctx.send(
         "Click the button below to bulk add collector requirements:",
@@ -378,7 +390,8 @@ async def collector_delete(
         if sp_obj is None:
             await ctx.send(
                 f"No requirement with special `{special}` found for "
-                f"**{countryball.country}**."
+                f"**{countryball.country}**.",
+                ephemeral=_ephemeral(ctx),
             )
             return
         qs = qs.filter(special=sp_obj)
@@ -388,7 +401,8 @@ async def collector_delete(
         target = f"**{special}**" if special else "all requirements"
         await ctx.send(
             f"Deleted {target} for **{countryball.country}** "
-            f"({deleted} requirement(s) removed)."
+            f"({deleted} requirement(s) removed).",
+            ephemeral=_ephemeral(ctx),
         )
         log.info(
             f"{ctx.author} deleted collector requirement(s) for "
@@ -398,7 +412,8 @@ async def collector_delete(
     else:
         await ctx.send(
             f"No collector requirement(s) found for **{countryball.country}**"
-            + (f" with special `{special}`" if special else "") + "."
+            + (f" with special `{special}`" if special else "") + ".",
+            ephemeral=_ephemeral(ctx),
         )
 
 
@@ -427,7 +442,8 @@ async def collector_view(
     ]
     if not reqs:
         await ctx.send(
-            f"No collector requirement exists for **{countryball.country}**."
+            f"No collector requirement exists for **{countryball.country}**.",
+            ephemeral=_ephemeral(ctx),
         )
         return
 
@@ -440,5 +456,6 @@ async def collector_view(
         )
 
     await ctx.send(
-        f"**Collector Requirements — {countryball.country}**\n" + "\n".join(lines)
+        f"**Collector Requirements — {countryball.country}**\n" + "\n".join(lines),
+        ephemeral=_ephemeral(ctx),
     )
