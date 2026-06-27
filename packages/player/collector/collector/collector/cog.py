@@ -244,21 +244,14 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
 
 class ChunkedCollectorSource(Source[str]):
     """
-    paginator limit 7 blocks
+    paginator limit 7 block
     """
 
-    def __init__(self, entries: list[tuple[str, int]], per_block: int = 7):
-        """
-        Parameters
-        ----------
-        entries: list of (line_text, amount)
-            Each line and its associated minimum amount.
-        per_block: int
-            Max entries to show under one **Minimum: X** header per page.
-        """
+    def __init__(self, entries: list[tuple[str, int]], per_block: int = 7, max_lines_per_page: int = 18):
         super().__init__()
         self.entries = entries
         self.per_block = per_block
+        self.max_lines_per_page = max_lines_per_page
         self._pages: list[str] = []
 
     async def prepare(self):
@@ -267,36 +260,56 @@ class ChunkedCollectorSource(Source[str]):
         for line, amount in self.entries:
             grouped[amount].append(line)
 
-        amounts = sorted(grouped.keys(), reverse=True)
+        seen_amounts: list[int] = []
+        for _, amount in self.entries:
+            if amount not in seen_amounts:
+                seen_amounts.append(amount)
 
-        pages: list[list[str]] = [[]]
-        current_page = 0
-
-        for amount in amounts:
+        segments: list[tuple[int, list[str]]] = []
+        for amount in seen_amounts:
             lines = grouped[amount]
-
             for i in range(0, len(lines), self.per_block):
                 chunk = lines[i:i + self.per_block]
-                is_continuation = i > 0
+                header = f"**Minimum: {amount:,}**"
+                segment_lines = [header] + chunk
+                segments.append((amount, segment_lines))
 
-                block_lines: list[str] = []
-                if is_continuation:
-                    block_lines.append(f"**Minimum: {amount:,} (continued)**")
-                else:
-                    block_lines.append(f"**Minimum: {amount:,}**")
-                block_lines.extend(chunk)
+        pages: list[list[str]] = [[]]
+        current_line_count = 0
 
-                block_text = "\n".join(block_lines)
-                current_text = "\n".join(pages[current_page]) if pages[current_page] else ""
+        for amount, segment_lines in segments:
+            segment_line_count = len(segment_lines)
 
-                if pages[current_page] and len(current_text) + len(block_text) > 3400:
+            if segment_line_count > self.max_lines_per_page:
+
+                header = segment_lines[0]
+                body = segment_lines[1:]
+
+                if pages[-1] and current_line_count + 1 > self.max_lines_per_page:
                     pages.append([])
-                    current_page += 1
+                    current_line_count = 0
 
-                    if is_continuation:
-                        block_lines[0] = f"**Minimum: {amount:,}**"
+                pages[-1].append(header)
+                current_line_count += 1
 
-                pages[current_page].extend(block_lines)
+                for line in body:
+                    if current_line_count + 1 > self.max_lines_per_page:
+                        pages.append([])
+                        current_line_count = 0
+
+                        pages[-1].append(header)
+                        current_line_count += 1
+                    pages[-1].append(line)
+                    current_line_count += 1
+                continue
+
+            if pages[-1] and current_line_count + segment_line_count > self.max_lines_per_page:
+
+                pages.append([])
+                current_line_count = 0
+
+            pages[-1].extend(segment_lines)
+            current_line_count += segment_line_count
 
         self._pages = ["\n".join(p) for p in pages if p]
 
