@@ -268,7 +268,7 @@ class ChunkedCollectorSource(Source[str]):
         blocks: list[tuple[int, list[str]]] = []
         for amount in seen_amounts:
             lines = grouped[amount]
-            header = f"∥ **Minimum: {amount:,}**"
+            header = f"**∥ Minimum: {amount:,}**"
             block_lines = [header] + lines
             blocks.append((amount, block_lines))
 
