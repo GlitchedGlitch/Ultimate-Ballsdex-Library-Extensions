@@ -33,7 +33,7 @@ def _ball_emoji(bot: "BallsDexBot", ball_id: int) -> str:
         emoji = bot.get_emoji(ball.emoji_id)
         if emoji:
             return str(emoji)
-    return "•"
+    return "⋄"
 
 async def _get_reqs(ball_id: int) -> list[CollectorRequirement]:
     return [
@@ -268,7 +268,7 @@ class ChunkedCollectorSource(Source[str]):
         blocks: list[tuple[int, list[str]]] = []
         for amount in seen_amounts:
             lines = grouped[amount]
-            header = f"**Minimum: {amount:,}**"
+            header = f"∥ **Minimum: {amount:,}**"
             block_lines = [header] + lines
             blocks.append((amount, block_lines))
 
@@ -379,7 +379,7 @@ class CollectorCog(commands.GroupCog, name="collector"):
                         continue
                     if count >= r.amount:
                         claimable.append(
-                            f"• {emoji} **{ball.country}** — {r.special.name} ✅ ready"
+                            f"⋄ {emoji} **{ball.country}** — {r.special.name} ✅ ready"
                         )
 
             if not claimable:
@@ -502,9 +502,9 @@ class CollectorCog(commands.GroupCog, name="collector"):
         for r in all_reqs:
             emoji = _ball_emoji(self.bot, r.ball_id)
             if special:
-                line = f"• {emoji} {r.ball.country}"
+                line = f"⋄ {emoji} {r.ball.country}"
             else:
-                line = f"• {emoji} {r.ball.country} -> *{r.special.name}*"
+                line = f"⋄ {emoji} {r.ball.country} -> *{r.special.name}*"
             entries.append((line, r.amount))
 
         title = f'"{special.strip()}" Collector List' if special else "Collector List"
