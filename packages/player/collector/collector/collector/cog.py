@@ -244,14 +244,14 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
 
 class ChunkedCollectorSource(Source[str]):
     """
-    paginator limit 7 block
+    paginator limit 7 blocks real
     """
 
-    def __init__(self, entries: list[tuple[str, int]], per_block: int = 7, max_lines_per_page: int = 18):
+    def __init__(self, entries: list[tuple[str, int]], max_blocks_per_page: int = 7, max_lines_per_page: int = 18):
         super().__init__()
         self.entries = entries
-        self.per_block = per_block
-        self.max_lines_per_page = max_lines_per_page
+        self.max_blocks = max_blocks_per_page
+        self.max_lines = max_lines_per_page
         self._pages: list[str] = []
 
     async def prepare(self):
@@ -265,51 +265,32 @@ class ChunkedCollectorSource(Source[str]):
             if amount not in seen_amounts:
                 seen_amounts.append(amount)
 
-        segments: list[tuple[int, list[str]]] = []
+        blocks: list[tuple[int, list[str]]] = []
         for amount in seen_amounts:
             lines = grouped[amount]
-            for i in range(0, len(lines), self.per_block):
-                chunk = lines[i:i + self.per_block]
-                header = f"**Minimum: {amount:,}**"
-                segment_lines = [header] + chunk
-                segments.append((amount, segment_lines))
+            header = f"**Minimum: {amount:,}**"
+            block_lines = [header] + lines
+            blocks.append((amount, block_lines))
 
         pages: list[list[str]] = [[]]
-        current_line_count = 0
+        current_blocks = 0
+        current_lines = 0
 
-        for amount, segment_lines in segments:
-            segment_line_count = len(segment_lines)
+        for amount, block_lines in blocks:
+            block_len = len(block_lines)
 
-            if segment_line_count > self.max_lines_per_page:
+            exceeds_blocks = current_blocks >= self.max_blocks
+            exceeds_lines = current_lines > 0 and current_lines + block_len > self.max_lines
 
-                header = segment_lines[0]
-                body = segment_lines[1:]
-
-                if pages[-1] and current_line_count + 1 > self.max_lines_per_page:
-                    pages.append([])
-                    current_line_count = 0
-
-                pages[-1].append(header)
-                current_line_count += 1
-
-                for line in body:
-                    if current_line_count + 1 > self.max_lines_per_page:
-                        pages.append([])
-                        current_line_count = 0
-
-                        pages[-1].append(header)
-                        current_line_count += 1
-                    pages[-1].append(line)
-                    current_line_count += 1
-                continue
-
-            if pages[-1] and current_line_count + segment_line_count > self.max_lines_per_page:
+            if pages[-1] and (exceeds_blocks or exceeds_lines):
 
                 pages.append([])
-                current_line_count = 0
+                current_blocks = 0
+                current_lines = 0
 
-            pages[-1].extend(segment_lines)
-            current_line_count += segment_line_count
+            pages[-1].extend(block_lines)
+            current_blocks += 1
+            current_lines += block_len
 
         self._pages = ["\n".join(p) for p in pages if p]
 
@@ -318,7 +299,6 @@ class ChunkedCollectorSource(Source[str]):
 
     async def get_page(self, page_number: int) -> str:
         return self._pages[page_number]
-
 # ── Player cog ────────────────────────────────────────────────────────────────
 
 class CollectorCog(commands.GroupCog, name="collector"):
