@@ -13,7 +13,8 @@ from discord import app_commands
 from discord.ext import commands
 from discord.ui import Modal, TextInput
 
-from ballsdex.core.utils.menus import Menu, TextSource, TextFormatter
+from ballsdex.core.utils.menus import Menu, TextFormatter
+from ballsdex.core.utils.menus.source import TextSource
 from bd_models.models import Ball, BallInstance, Player, balls as balls_cache
 from collector.models import CollectorClaim, CollectorRequirement
 from settings.models import settings
@@ -218,7 +219,7 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
                 special=special,
                 defaults={"amount": amount},
             )
-            added.append(f"**{ball.country}** — ≥{amount:,} → {special.name}")
+            added.append(f"**{ball.country}** — ≥{amount:,} -> {special.name}")
 
         result_lines: list[str] = []
         if added:
@@ -274,8 +275,8 @@ class CollectorCog(commands.GroupCog, name="collector"):
                             name=req.ball.country, value=req.ball.country
                         )
                     )
-            if len(results) >= 25:
-                break
+                if len(results) >= 25:
+                    break
         return results
 
     @app_commands.command()
@@ -456,38 +457,40 @@ class CollectorCog(commands.GroupCog, name="collector"):
 
         lines: list[str] = []
         current_amount: int | None = None
-        
+
         for r in all_reqs:
             emoji = _ball_emoji(self.bot, r.ball_id)
             if special:
                 line = f"• {emoji} {r.ball.country}"
             else:
-                line = f"• {emoji} {r.ball.country} → *{r.special.name}*"
-            
+                line = f"• {emoji} {r.ball.country} -> *{r.special.name}*"
+
             if r.amount != current_amount:
                 if lines:
                     lines.append("")
                 lines.append(f"**Minimum: {r.amount:,}**")
                 current_amount = r.amount
-            
+
             lines.append(line)
 
         full_text = "\n".join(lines)
         title = f'"{special.strip()}" Collector List' if special else "Collector List"
-        
-        header = discord.ui.Section(
-            discord.ui.TextDisplay(f"# {title}"),
-            accessory=discord.ui.Thumbnail(url=self.bot.user.display_avatar.url if self.bot.user else ""),
-        )
 
         view = discord.ui.LayoutView()
         container = discord.ui.Container()
+
+        header = discord.ui.Section(
+            discord.ui.TextDisplay(f"# {title}"),
+            accessory=discord.ui.Thumbnail(
+                url=self.bot.user.display_avatar.url if self.bot.user else ""
+            ),
+        )
         container.add_item(header)
         container.add_item(discord.ui.Separator())
-        view.add_item(container)
 
-        text_display = discord.ui.TextDisplay("Loading...")
+        text_display = discord.ui.TextDisplay("")
         container.add_item(text_display)
+        view.add_item(container)
 
         source = TextSource(
             full_text,
@@ -496,7 +499,7 @@ class CollectorCog(commands.GroupCog, name="collector"):
             suffix="",
         )
         formatter = TextFormatter(text_display)
-        
+
         menu = Menu(self.bot, view, source, formatter)
         await menu.init(container=container)
 
@@ -517,6 +520,6 @@ class CollectorCog(commands.GroupCog, name="collector"):
         ):
             if current.lower() in name.lower():
                 seen[name.lower()] = name
-            if len(seen) >= 25:
-                break
+                if len(seen) >= 25:
+                    break
         return [app_commands.Choice(name=n, value=n) for n in seen.values()]
