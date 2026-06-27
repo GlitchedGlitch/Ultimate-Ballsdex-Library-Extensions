@@ -525,7 +525,7 @@ class CollectorCog(commands.GroupCog, name="collector"):
         container.add_item(text_display)
         view.add_item(container)
 
-        source = ChunkedCollectorSource(entries, per_block=7)
+        source = ChunkedCollectorSource(entries, max_blocks_per_page=7, max_lines_per_page=18)
         formatter = TextFormatter(text_display)
 
         menu = Menu(self.bot, view, source, formatter)
