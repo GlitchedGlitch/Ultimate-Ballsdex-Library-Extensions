@@ -283,7 +283,7 @@ class CollectorCog(commands.GroupCog, name="collector"):
     @app_commands.describe(
         countryball=(
             f"The {settings.collectible_name} to claim "
-            "(leave empty to see your full overview)"
+            "(leave empty to see what you can claim)"
         )
     )
     @app_commands.autocomplete(countryball=_claim_ball_autocomplete)
@@ -293,7 +293,6 @@ class CollectorCog(commands.GroupCog, name="collector"):
 
         player, _ = await Player.objects.aget_or_create(discord_id=interaction.user.id)
 
-        # ── No argument: show overview ────────────────────────────────────────
         if countryball is None:
             all_reqs = [
                 r async for r in
@@ -307,13 +306,11 @@ class CollectorCog(commands.GroupCog, name="collector"):
                 )
                 return
 
-            # Group by ball
             by_ball: dict[int, list[CollectorRequirement]] = defaultdict(list)
             for r in all_reqs:
                 by_ball[r.ball_id].append(r)
 
             claimable: list[str] = []
-            in_progress: list[str] = []
 
             for ball_id, reqs in by_ball.items():
                 ball = balls_cache.get(ball_id) or reqs[0].ball
@@ -327,34 +324,23 @@ class CollectorCog(commands.GroupCog, name="collector"):
                         claimable.append(
                             f"• {emoji} **{ball.country}** — {r.special.name} ✅ ready"
                         )
-                    else:
-                        pct = round(100 * count / r.amount)
-                        in_progress.append(
-                            f"• {emoji} **{ball.country}** — {r.special.name} "
-                            f"({count:,}/{r.amount:,} · {pct}%)"
-                        )
 
-            if not claimable and not in_progress:
+            if not claimable:
                 await interaction.followup.send(
-                    "You have already claimed all available collector rewards!",
+                    "You have no collector rewards ready to claim right now.\n"
+                    f"Use `/collector claim {settings.collectible_name}:` to check progress on a specific ball.",
                     ephemeral=True,
                 )
                 return
 
             lines: list[str] = []
-            if claimable:
-                lines.append("**Ready to claim:**")
-                lines.extend(claimable[:20])
-                if len(claimable) > 20:
-                    lines.append(f"*...and {len(claimable) - 20} more*")
-            if in_progress:
-                lines.append("\n**In progress:**")
-                lines.extend(in_progress[:20])
-                if len(in_progress) > 20:
-                    lines.append(f"*...and {len(in_progress) - 20} more*")
-                lines.append(
-                    f"\nUse `/collector claim {settings.collectible_name}:` to claim a specific ball."
-                )
+            lines.append("**Ready to claim:**")
+            lines.extend(claimable[:25])
+            if len(claimable) > 25:
+                lines.append(f"*...and {len(claimable) - 25} more*")
+            lines.append(
+                f"\nUse `/collector claim {settings.collectible_name}:` to claim a specific ball."
+            )
             await interaction.followup.send("\n".join(lines), ephemeral=True)
             return
 
@@ -482,7 +468,7 @@ class CollectorCog(commands.GroupCog, name="collector"):
         header = discord.ui.Section(
             discord.ui.TextDisplay(f"# {title}"),
             accessory=discord.ui.Thumbnail(
-                url=self.bot.user.display_avatar.url if self.bot.user else ""
+                self.bot.user.display_avatar.url if self.bot.user else ""
             ),
         )
         container.add_item(header)
