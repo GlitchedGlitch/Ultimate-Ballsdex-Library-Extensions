@@ -14,7 +14,7 @@ from discord.ext import commands
 from discord.ui import Modal, TextInput
 
 from ballsdex.core.utils.menus import Menu, TextFormatter
-from ballsdex.core.utils.menus.source import TextSource
+from ballsdex.core.utils.menus.source import Source
 from bd_models.models import Ball, BallInstance, Player, balls as balls_cache
 from collector.models import CollectorClaim, CollectorRequirement
 from settings.models import settings
@@ -242,6 +242,70 @@ class BulkAddModal(Modal, title="Bulk Add Collector Requirements"):
                 extra={"webhook": True},
             )
 
+class ChunkedCollectorSource(Source[str]):
+    """
+    paginator limit 7 blocks
+    """
+
+    def __init__(self, entries: list[tuple[str, int]], per_block: int = 7):
+        """
+        Parameters
+        ----------
+        entries: list of (line_text, amount)
+            Each line and its associated minimum amount.
+        per_block: int
+            Max entries to show under one **Minimum: X** header per page.
+        """
+        super().__init__()
+        self.entries = entries
+        self.per_block = per_block
+        self._pages: list[str] = []
+
+    async def prepare(self):
+
+        grouped: dict[int, list[str]] = defaultdict(list)
+        for line, amount in self.entries:
+            grouped[amount].append(line)
+
+        amounts = sorted(grouped.keys(), reverse=True)
+
+        pages: list[list[str]] = [[]]
+        current_page = 0
+
+        for amount in amounts:
+            lines = grouped[amount]
+
+            for i in range(0, len(lines), self.per_block):
+                chunk = lines[i:i + self.per_block]
+                is_continuation = i > 0
+
+                block_lines: list[str] = []
+                if is_continuation:
+                    block_lines.append(f"**Minimum: {amount:,} (continued)**")
+                else:
+                    block_lines.append(f"**Minimum: {amount:,}**")
+                block_lines.extend(chunk)
+
+                block_text = "\n".join(block_lines)
+                current_text = "\n".join(pages[current_page]) if pages[current_page] else ""
+
+                if pages[current_page] and len(current_text) + len(block_text) > 3400:
+                    pages.append([])
+                    current_page += 1
+
+                    if is_continuation:
+                        block_lines[0] = f"**Minimum: {amount:,}**"
+
+                pages[current_page].extend(block_lines)
+
+        self._pages = ["\n".join(p) for p in pages if p]
+
+    def get_max_pages(self) -> int:
+        return len(self._pages)
+
+    async def get_page(self, page_number: int) -> str:
+        return self._pages[page_number]
+
 # ── Player cog ────────────────────────────────────────────────────────────────
 
 class CollectorCog(commands.GroupCog, name="collector"):
@@ -441,25 +505,15 @@ class CollectorCog(commands.GroupCog, name="collector"):
             await interaction.followup.send(msg, ephemeral=True)
             return
 
-        lines: list[str] = []
-        current_amount: int | None = None
-
+        entries: list[tuple[str, int]] = []
         for r in all_reqs:
             emoji = _ball_emoji(self.bot, r.ball_id)
             if special:
                 line = f"• {emoji} {r.ball.country}"
             else:
                 line = f"• {emoji} {r.ball.country} -> *{r.special.name}*"
+            entries.append((line, r.amount))
 
-            if r.amount != current_amount:
-                if lines:
-                    lines.append("")
-                lines.append(f"**Minimum: {r.amount:,}**")
-                current_amount = r.amount
-
-            lines.append(line)
-
-        full_text = "\n".join(lines)
         title = f'"{special.strip()}" Collector List' if special else "Collector List"
 
         view = discord.ui.LayoutView()
@@ -478,12 +532,7 @@ class CollectorCog(commands.GroupCog, name="collector"):
         container.add_item(text_display)
         view.add_item(container)
 
-        source = TextSource(
-            full_text,
-            page_length=3500,
-            prefix="",
-            suffix="",
-        )
+        source = ChunkedCollectorSource(entries, per_block=7)
         formatter = TextFormatter(text_display)
 
         menu = Menu(self.bot, view, source, formatter)
