@@ -191,7 +191,7 @@ class BulkAddButtonView(discord.ui.View):
 @checks.is_staff()
 async def collector(ctx: commands.Context["BallsDexBot"]):
     """
-    Collector requirement management.
+    Collector requirement management
     """
     await ctx.send_help(ctx.command)
 
