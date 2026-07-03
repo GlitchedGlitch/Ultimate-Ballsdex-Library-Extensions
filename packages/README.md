@@ -4,7 +4,7 @@ Here you can find all the packages I create for you guys :D
 You can find some packages regarding fun, adminn functions, database and more!
 
 ## How to download?
-You can simply get these packages by either manually downloading the files (not the installer.py, that's used for eval installing) or running the eval installer provided in that package folder.
+You can simply get these packages by either manually add the extra.toml files or running the eval installer provided in that package folder.
 Alternatively you can run this eval to browse all the packages directly on discord 😋 
 ```py
 .eval
