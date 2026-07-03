@@ -214,7 +214,7 @@ def build_settings_embed() -> discord.Embed:
         buttons_display = "Inside the message" if s["buttons_inside"] == "true" else "Outside the message"
     e = discord.Embed(
         title="Rarity Package Settings",
-        description="Configure how the `/{group} rarity` command appears.",
+        description=f"Configure how the `/{settings.balls_slash_name} rarity` command appears.",
         color=_hex_to_color(s["embed_color"]) or discord.Color.blurple(),
     )
     e.add_field(name="Line Color", value=color_display, inline=False)
@@ -408,7 +408,7 @@ class InstallWarningView(View):
                     "Added to `config/extra.toml`.\n\n"
                     "Now rebuild and restart your bot to finish the install:\n"
                     "```\ndocker compose build\ndocker compose up -d\n```\n"
-                    "After the rebuild, `/{group} rarity` will be available.",
+                    f"After the rebuild, `/{settings.balls_slash_name} rarity` will be available.",
                     discord.Color.green(),
                 ),
                 view=None,
