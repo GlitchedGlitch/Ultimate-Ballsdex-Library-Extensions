@@ -132,7 +132,7 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
         total_pages = -(-len(entries) // GROUPS_PER_PAGE)
 
         source = FieldPageSource(entries, per_page=GROUPS_PER_PAGE, inline=False)
-        source.embed.title = f"{plural} Rarity List"
+        source.embed.title = f"{settings.bot_name} Rarity List"
         source.embed.color = 0XFFFFFF
 
         pages = Pages(source, interaction=interaction)
