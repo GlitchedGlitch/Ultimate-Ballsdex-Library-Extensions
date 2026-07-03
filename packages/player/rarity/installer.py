@@ -1,5 +1,6 @@
 import asyncio, base64, io, os, requests, traceback, discord
 from discord.ui import View, Button
+from ballsdex.settings import settings
 
 REPO = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
 BASE = "https://api.github.com/repos/GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions/contents/packages/player/rarity/{}?ref=v2-main".format("{}")
@@ -102,11 +103,11 @@ def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
         description=(
             "Adds a rarity list command to your BallsDex instance.\n\n"
             "**Commands**\n"
-            "• `/{group} rarity` — displays the full rarity list\n\n"
+            f"• `/{settings.players_group_cog_name} rarity` - displays the full rarity list\n\n"
             "**Parameters**\n"
-            "• `search` — search by ball name or rarity value\n"
-            "• `reverse` — sort from highest to lowest rarity\n"
-            "• `ephemeral` — show result only to you\n\n"
+            "• `search` - search by ball name or rarity value\n"
+            "• `reverse` - sort from highest to lowest rarity\n"
+            "• `ephemeral` - show result only to you\n\n"
             f"**Status:** {'✅ Installed' if installed else '❌ Not installed'}"
         ),
         color=color,
@@ -440,7 +441,7 @@ def _is_v3() -> bool:
         pass
     try:
         import tortoise  # noqa: F401
-        return False  # Tortoise present, Django not ready — this is v2
+        return False  # Tortoise present, Django not ready - this is v2
     except ImportError:
         pass
     return True
