@@ -4,6 +4,7 @@ Rarity Package Installer v3
 
 import io, os, re, traceback, discord
 from discord.ui import View, Button, Modal, TextInput
+from settings.models import settings
 
 REPO        = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
 BRANCH      = "v3"
