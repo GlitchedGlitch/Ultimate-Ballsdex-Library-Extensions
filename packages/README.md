@@ -1,7 +1,7 @@
 # Packages
 ## What is this?
 Here you can find all the packages I create for you guys :D
-You can find some packages regarding fun, adminn functions, database and more!
+You can find some packages regarding fun, admin functions, database and more!
 
 ## How to download?
 You can simply get these packages by either manually add the extra.toml files or running the eval installer provided in that package folder.
