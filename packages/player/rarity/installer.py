@@ -130,17 +130,17 @@ def _hex_to_color(hex_str: str) -> discord.Color | None:
 # ── Embeds ────────────────────────────────────────────────────────────────────
 
 def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
-    status = "✅ Registered in `extra.toml` — rebuild to activate" if installed else "❌ Not installed"
+    status = "✅ Registered in `extra.toml` - rebuild to activate" if installed else "❌ Not installed"
     e = discord.Embed(
         title="Rarity Package",
         description=(
             "Adds a rarity list command to your BallsDex instance.\n\n"
             "**Commands**\n"
-            "• `/{group} rarity` — displays the full rarity list\n\n"
+            f"• `/{settings.balls_slash_name} rarity` - displays the full rarity list\n\n"
             "**Parameters**\n"
-            "• `search` — search by ball name or rarity value\n"
-            "• `reverse` — sort from highest to lowest rarity\n"
-            "• `ephemeral` — show result only to you\n\n"
+            "• `search` - search by ball name or rarity value\n"
+            "• `reverse` - sort from highest to lowest rarity\n"
+            "• `ephemeral` - show result only to you\n\n"
             f"**Status:** {status}"
         ),
         color=color,
@@ -151,7 +151,7 @@ def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
 
 def build_warning_embed() -> discord.Embed:
     e = discord.Embed(
-        title="⚠️ Before Installing — Required Setup",
+        title="⚠️ Before Installing - Required Setup",
         description=(
             "The installer needs to write to `config/extra.toml`. "
             "By default Docker mounts this folder as **read-only**, "
@@ -404,7 +404,7 @@ class InstallWarningView(View):
             self.stop()
             await self.parent.message.edit(
                 embed=build_result_embed(
-                    "Entry Added — Rebuild Required",
+                    "Entry Added - Rebuild Required",
                     "Added to `config/extra.toml`.\n\n"
                     "Now rebuild and restart your bot to finish the install:\n"
                     "```\ndocker compose build\ndocker compose up -d\n```\n"
@@ -420,7 +420,7 @@ class InstallWarningView(View):
             await self.parent.message.edit(
                 embed=build_result_embed(
                     "Permission Denied",
-                    f"Could not write to `config/extra.toml` — the folder is still **read-only** (`{e.strerror}`).\n\n"
+                    f"Could not write to `config/extra.toml` - the folder is still **read-only** (`{e.strerror}`).\n\n"
                     "Make sure you edited `docker-compose.yml` and restarted the containers first:\n"
                     "```yaml\n- \"./config:/code/admin_panel/config:rw\"\n- \"./extra:/code/extra:rw\"\n```\n"
                     "```\ndocker compose down\ndocker compose build\ndocker compose up -d\n```\n"
