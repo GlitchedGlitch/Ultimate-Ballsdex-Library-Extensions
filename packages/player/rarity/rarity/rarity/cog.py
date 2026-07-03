@@ -375,7 +375,7 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
             embed_pages: list[discord.Embed] = []
             for page_num, chunk in enumerate(chunks, start=1):
                 e = discord.Embed(
-                    title=f"{plural} Rarity List",
+                    title=f"{settings.bot_name} Rarity List",
                     color=line_color if line_color is not None else discord.Color(0xFFFFFF),
                 )
                 for name, value in chunk:
