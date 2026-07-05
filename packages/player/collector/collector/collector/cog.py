@@ -507,7 +507,7 @@ class CollectorCog(commands.GroupCog, name="collector"):
                 line = f"⋄ {emoji} {r.ball.country} -> *{r.special.name}*"
             entries.append((line, r.amount))
 
-        title = f'{settings.bot_name} "{special.strip()}" Collector List' if special else "Collector List"
+        title = f'{settings.bot_name} "{special.strip()}" Collector List' if special else f"{settings.bot_name} Collector List"
 
         view = discord.ui.LayoutView()
         container = discord.ui.Container()
