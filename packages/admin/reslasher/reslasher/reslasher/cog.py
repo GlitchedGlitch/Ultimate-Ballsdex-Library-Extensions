@@ -72,56 +72,114 @@ async def sync_registry(commands_list: list) -> int:
     return await _do_sync()
 
 
-class ReSlasherCog(commands.Cog):
-    def __init__(self, bot: "BallsDexBot"):
-        self.bot = bot
-
-    @commands.Cog.listener()
-    async def on_ready(self):
-        """Sync registry on startup."""
-        commands_list = _walk_commands(self.bot.tree)
-        created = await sync_registry(commands_list)
-        log.info("ReSlasher: synced %d commands to registry (%d new)", len(commands_list), created)
-
-    async def cog_unload(self):
-        pass
-
-
-async def apply_overrides(bot: "BallsDexBot") -> int:
+def _apply_overrides_sync(tree, overrides: dict) -> tuple[int, list[str]]:
     """
-    Read overrides from DB and apply them by deleting old commands and creating new ones
+    Apply name overrides to the command tree. Returns (applied_count, errors).
+    Called synchronously before tree.sync().
     """
-    @sync_to_async
-    def _get_overrides():
-        return {
-            (o.group, o.subgroup, o.command): o.name
-            for o in CommandNameOverride.objects.all()
-        }
-
-    overrides = await _get_overrides()
-    if not overrides:
-        return 0
-
-    commands_list = _walk_commands(bot.tree)
+    commands_list = _walk_commands(tree)
     current_by_key: dict[tuple[str, str, str], app_commands.Command] = {
         (g, sg, c): cmd for g, sg, c, cmd in commands_list
     }
 
-    renamed = 0
+    names_by_parent: dict[tuple[str, str], dict[str, tuple]] = {}
+    errors: list[str] = []
+    
     for (group, subgroup, cmd_internal), new_name in overrides.items():
         key = (group, subgroup, cmd_internal)
         cmd = current_by_key.get(key)
         if not cmd:
             continue
-
-        if cmd.name == new_name:
-            continue
         
-        cmd.name = new_name
-        renamed += 1
-        log.info("ReSlasher: renamed /%s to '%s'", " ".join(filter(None, key)), new_name)
+        parent = (group, subgroup)
+        if parent not in names_by_parent:
+            names_by_parent[parent] = {}
+        
+        for other_key, other_cmd in current_by_key.items():
+            if other_key == key:
+                continue
+            og, osg, oc = other_key
+            if (og, osg) == parent and other_cmd.name == new_name:
+                errors.append(
+                    f"Skip: /{' '.join(filter(None, key))} -> '{new_name}' "
+                    f"(conflicts with /{' '.join(filter(None, other_key))})"
+                )
+                break
+        
+        if new_name not in names_by_parent.get(parent, {}):
+            if parent not in names_by_parent:
+                names_by_parent[parent] = {}
+            names_by_parent[parent][new_name] = key
 
-    return renamed
+    if errors:
+        return 0, errors
+
+    applied = 0
+    for (group, subgroup, cmd_internal), new_name in overrides.items():
+        key = (group, subgroup, cmd_internal)
+        cmd = current_by_key.get(key)
+        if cmd and cmd.name != new_name:
+            cmd.name = new_name
+            applied += 1
+
+    return applied, []
+
+
+class ReSlasherCog(commands.Cog):
+    def __init__(self, bot: "BallsDexBot"):
+        self.bot = bot
+        self._original_sync = None
+
+    def _patch_sync(self):
+        """Monkey-patch tree.sync to apply overrides before syncing."""
+        if self._original_sync is not None:
+            return
+
+        self._original_sync = self.bot.tree.sync
+
+        async def patched_sync(guild=None):
+            @sync_to_async
+            def _load_overrides():
+                return {
+                    (o.group, o.subgroup, o.command): o.name
+                    for o in CommandNameOverride.objects.all()
+                }
+
+            try:
+                overrides = await _load_overrides()
+                if overrides:
+                    applied, errors = _apply_overrides_sync(self.bot.tree, overrides)
+                    if applied:
+                        log.info("ReSlasher: applied %d override(s) before sync", applied)
+                    if errors:
+                        for err in errors:
+                            log.warning("ReSlasher: %s", err)
+            except Exception:
+                log.warning("ReSlasher: failed to apply overrides before sync", exc_info=True)
+
+            return await self._original_sync(guild=guild)
+
+        self.bot.tree.sync = patched_sync
+        log.info("ReSlasher: patched tree.sync()")
+
+    def _unpatch_sync(self):
+        """Restore original tree.sync."""
+        if self._original_sync is not None:
+            self.bot.tree.sync = self._original_sync
+            self._original_sync = None
+            log.info("ReSlasher: restored original tree.sync()")
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        """Sync registry and patch tree.sync on startup."""
+        commands_list = _walk_commands(self.bot.tree)
+        created = await sync_registry(commands_list)
+        log.info("ReSlasher: synced %d commands to registry (%d new)", len(commands_list), created)
+        
+        self._patch_sync()
+
+    async def cog_unload(self):
+        self._unpatch_sync()
 
 
 async def setup(bot: "BallsDexBot") -> None:
@@ -134,6 +192,7 @@ async def setup(bot: "BallsDexBot") -> None:
         commands_list = _walk_commands(bot.tree)
         created = await sync_registry(commands_list)
         log.info("ReSlasher: eagerly synced %d commands (%d new)", len(commands_list), created)
+        cog._patch_sync()
     
     log.info("ReSlasherCog loaded")
 
