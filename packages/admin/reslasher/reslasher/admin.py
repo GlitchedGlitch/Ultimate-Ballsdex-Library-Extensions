@@ -119,8 +119,7 @@ class CommandNamesAdmin(admin.ModelAdmin):
             }
             return render(request, "reslasher/command_names.html", context)
 
-        new_names: dict[tuple[str, str, str], str] = {}
-        name_to_key: dict[str, tuple[str, str, str]] = {}
+        proposed: dict[tuple[str, str, str], str] = {}
         
         for field_key, value in form.cleaned_data.items():
             parts = field_key.split("__")
@@ -136,18 +135,44 @@ class CommandNamesAdmin(admin.ModelAdmin):
             if not value or value == cmd_internal:
                 continue
                 
-            key = (group, subgroup, cmd_internal)
-            new_names[key] = value
-            
-            if value in name_to_key:
-                other_key = name_to_key[value]
+            proposed[(group, subgroup, cmd_internal)] = value
+
+        names_by_parent: dict[tuple[str, str], list[str]] = {}
+        for (g, sg, c), new_name in proposed.items():
+            parent = (g, sg)
+            if parent not in names_by_parent:
+                names_by_parent[parent] = []
+            for other_name in names_by_parent[parent]:
+                if other_name == new_name:
+                    field_key = f"{g}__{sg}__{c}" if sg else f"{g}__{c}"
+                    form.add_error(
+                        field_key,
+                        f"Name '{new_name}' conflicts with another command in the same group."
+                    )
+                    break
+            else:
+                names_by_parent[parent].append(new_name)
+                continue
+            break
+
+        existing_names: dict[tuple[str, str], set[str]] = {}
+        for row in CommandRegistry.objects.all():
+            parent = (row.group, row.subgroup)
+            if parent not in existing_names:
+                existing_names[parent] = set()
+            override = proposed.get((row.group, row.subgroup, row.command))
+            existing_names[parent].add(override or row.command)
+
+        for (g, sg, c), new_name in proposed.items():
+            parent = (g, sg)
+            count = sum(1 for name in existing_names.get(parent, []) if name == new_name)
+            if count > 1:
+                field_key = f"{g}__{sg}__{c}" if sg else f"{g}__{c}"
                 form.add_error(
                     field_key,
-                    f"Name '{value}' is already used by {'/'.join(filter(None, other_key))}"
+                    f"Name '{new_name}' already exists in this group. Choose a different name."
                 )
-            else:
-                name_to_key[value] = key
-        
+
         if not form.is_valid():
             context = {
                 **self.admin_site.each_context(request),
@@ -195,8 +220,9 @@ class CommandNamesAdmin(admin.ModelAdmin):
             parts.append(f"{saved} override(s) saved")
         if cleared:
             parts.append(f"{cleared} reset to default")
+        
         if parts:
-            messages.success(request, "Command names updated: " + ", ".join(parts) + ".")
+            messages.success(request, "Command names updated: " + ", ".join(parts) + ". Restart the bot to apply changes.")
         else:
             messages.info(request, "No changes made.")
 
