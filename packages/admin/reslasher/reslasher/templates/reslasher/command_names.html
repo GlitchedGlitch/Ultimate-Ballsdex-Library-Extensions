@@ -1,7 +1,7 @@
 {% extends "admin/base_site.html" %}
 {% load i18n %}
 
-{% block title %}Command Names | {{ site_title|default:_('Django site admin') }}{% endblock %}
+{% block title %}{% trans 'Command Names' %} | {{ site_title|default:_('Django site admin') }}{% endblock %}
 
 {% block breadcrumbs %}
 <div class="breadcrumbs">
@@ -12,7 +12,6 @@
 {% endblock %}
 
 {% block content %}
-<h1>Command Names</h1>
 <p>Set a custom display name for any slash command. Leave a field blank or unchanged to keep the default. Changes take effect after the bot applies them on the next sync — run <code>b.admin syncslash</code> in Discord after saving.</p>
 
 {% if messages %}
