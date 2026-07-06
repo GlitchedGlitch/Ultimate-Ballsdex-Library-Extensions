@@ -19,3 +19,6 @@ Package = "https://github.com/GlitchedGlitch/Ultimate-Ballsdex-Library-Extension
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["reslasher*"]
+
+[tool.setuptools.package-data]
+reslasher = ["templates/**/*", "static/**/*"]
