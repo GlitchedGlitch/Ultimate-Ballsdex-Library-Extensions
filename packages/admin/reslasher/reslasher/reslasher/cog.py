@@ -22,7 +22,8 @@ log = logging.getLogger("ballsdex.packages.reslasher")
 
 def _walk_commands(tree) -> list[tuple[str, str, str, app_commands.Command]]:
     """
-    Walk the entire command tree and return flat list
+    Walk the entire command tree and return flat list of:
+    (group, subgroup, command_name, command_object)
     """
     result: list[tuple[str, str, str, app_commands.Command]] = []
     
@@ -72,10 +73,11 @@ async def sync_registry(commands_list: list) -> int:
     return await _do_sync()
 
 
-def _apply_overrides_sync(tree, overrides: dict) -> tuple[int, list[str]]:
+def _apply_overrides(tree, overrides: dict) -> tuple[int, list[str]]:
     """
-    Apply name overrides to the command tree. Returns (applied_count, errors).
-    Called synchronously before tree.sync().
+    Apply name overrides to the command tree.
+    Also updates parent Group._children and Tree._children dicts.
+    Returns (applied_count, errors).
     """
     commands_list = _walk_commands(tree)
     current_by_key: dict[tuple[str, str, str], app_commands.Command] = {
@@ -118,11 +120,28 @@ def _apply_overrides_sync(tree, overrides: dict) -> tuple[int, list[str]]:
     for (group, subgroup, cmd_internal), new_name in overrides.items():
         key = (group, subgroup, cmd_internal)
         cmd = current_by_key.get(key)
-        if cmd and cmd.name != new_name:
-            cmd.name = new_name
-            applied += 1
+        if not cmd or cmd.name == new_name:
+            continue
+        
+        old_name = cmd.name
+        
+        if cmd.parent and hasattr(cmd.parent, '_children'):
+            parent_children = cmd.parent._children
+            if old_name in parent_children:
+                del parent_children[old_name]
+            parent_children[new_name] = cmd
+        
+        if not cmd.parent and hasattr(tree, '_children'):
+            tree_children = tree._children
+            if old_name in tree_children:
+                del tree_children[old_name]
+            tree_children[new_name] = cmd
+        
+        cmd.name = new_name
+        applied += 1
+        log.info("ReSlasher: renamed /%s -> '%s'", " ".join(filter(None, key)), new_name)
 
-    return applied, []
+    return applied, errors
 
 
 class ReSlasherCog(commands.Cog):
@@ -148,7 +167,7 @@ class ReSlasherCog(commands.Cog):
             try:
                 overrides = await _load_overrides()
                 if overrides:
-                    applied, errors = _apply_overrides_sync(self.bot.tree, overrides)
+                    applied, errors = _apply_overrides(self.bot.tree, overrides)
                     if applied:
                         log.info("ReSlasher: applied %d override(s) before sync", applied)
                     if errors:
