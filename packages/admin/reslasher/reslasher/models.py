@@ -16,21 +16,28 @@ class CommandRegistry(models.Model):
         max_length=32,
         blank=True,
         default="",
-        help_text="Parent group name. Empty for top-level ungrouped commands.",
+        help_text="Top-level group name. Empty for top-level ungrouped commands.",
+    )
+    subgroup = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        help_text="Nested subgroup name. Empty for 2-word commands.",
     )
     command = models.CharField(
         max_length=32,
-        help_text="Internal command name as registered by the bot.",
+        help_text="Leaf command name.",
     )
 
     class Meta:
-        unique_together = [("group", "command")]
-        ordering = ["group", "command"]
+        unique_together = [("group", "subgroup", "command")]
+        ordering = ["group", "subgroup", "command"]
         verbose_name = "Registered Command"
         verbose_name_plural = "Registered Commands"
 
     def __str__(self) -> str:
-        return f"/{self.group} {self.command}".strip()
+        parts = [p for p in (self.group, self.subgroup, self.command) if p]
+        return "/" + " ".join(parts)
 
 
 class CommandNameOverride(models.Model):
@@ -42,11 +49,17 @@ class CommandNameOverride(models.Model):
         max_length=32,
         blank=True,
         default="",
-        help_text="Parent group name. Empty for top-level ungrouped commands.",
+        help_text="Top-level group name.",
+    )
+    subgroup = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        help_text="Nested subgroup name.",
     )
     command = models.CharField(
         max_length=32,
-        help_text="Original internal command name as registered by the bot.",
+        help_text="Original leaf command name.",
     )
     name = models.CharField(
         max_length=32,
@@ -55,12 +68,11 @@ class CommandNameOverride(models.Model):
     )
 
     class Meta:
-        unique_together = [("group", "command")]
-        ordering = ["group", "command"]
+        unique_together = [("group", "subgroup", "command")]
+        ordering = ["group", "subgroup", "command"]
         verbose_name = "Command Name Override"
         verbose_name_plural = "Command Name Overrides"
 
     def __str__(self) -> str:
-        if self.group:
-            return f"/{self.group} {self.command} → {self.name}"
-        return f"/{self.command} -> {self.name}"
+        parts = [p for p in (self.group, self.subgroup, self.command) if p]
+        return f"/{' '.join(parts)} -> {self.name}"
