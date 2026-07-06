@@ -38,70 +38,72 @@ def _collect_leaf_commands(
     return result
 
 
+async def sync_registry(leaf_commands: dict[tuple[str, str], app_commands.Command]) -> int:
+    """Write all known leaf commands to CommandRegistry for admin panel discovery."""
+    @sync_to_async
+    def _do_sync():
+        existing = {
+            (r.group, r.command)
+            for r in CommandRegistry.objects.all()
+        }
+        new_keys = set(leaf_commands.keys())
+
+        to_create = [
+            CommandRegistry(group=g, command=c)
+            for g, c in new_keys - existing
+        ]
+        created = 0
+        if to_create:
+            CommandRegistry.objects.bulk_create(to_create, ignore_conflicts=True)
+            created = len(to_create)
+
+        stale = existing - new_keys
+        if stale:
+            for group, command in stale:
+                CommandRegistry.objects.filter(group=group, command=command).delete()
+
+        return created
+
+    return await _do_sync()
+
+
+async def apply_overrides(
+    leaf_commands: dict[tuple[str, str], app_commands.Command],
+    originals: dict[tuple[str, str], str],
+) -> int:
+    """Read overrides from DB and apply them to live command objects."""
+    overrides = {
+        (o.group, o.command): o.name
+        async for o in CommandNameOverride.objects.all()
+    }
+
+    renamed = 0
+    for (group, cmd_internal), cmd in leaf_commands.items():
+        override_name = overrides.get((group, cmd_internal))
+        if override_name and override_name != cmd_internal:
+            originals[(group, cmd_internal)] = cmd.name
+            cmd.name = override_name
+            renamed += 1
+
+    return renamed
+
+
 class ReSlasherCog(commands.Cog):
     def __init__(self, bot: "BallsDexBot"):
         self.bot = bot
         self._originals: dict[tuple[str, str], str] = {}
-
-    async def _sync_registry(self, leaf_commands: dict[tuple[str, str], app_commands.Command]):
-        """Write all known leaf commands to CommandRegistry for admin panel discovery."""
-        @sync_to_async
-        def _do_sync():
-            existing = {
-                (r.group, r.command)
-                for r in CommandRegistry.objects.all()
-            }
-            new_keys = set(leaf_commands.keys())
-
-            to_create = [
-                CommandRegistry(group=g, command=c)
-                for g, c in new_keys - existing
-            ]
-            if to_create:
-                CommandRegistry.objects.bulk_create(to_create, ignore_conflicts=True)
-
-            stale = existing - new_keys
-            if stale:
-                for group, command in stale:
-                    CommandRegistry.objects.filter(group=group, command=command).delete()
-
-        await _do_sync()
-
-    async def _apply_overrides(self, leaf_commands: dict[tuple[str, str], app_commands.Command]):
-        """Read overrides from DB and apply them to live command objects."""
-        overrides = {
-            (o.group, o.command): o.name
-            async for o in CommandNameOverride.objects.all()
-        }
-
-        renamed = 0
-        for (group, cmd_internal), cmd in leaf_commands.items():
-            override_name = overrides.get((group, cmd_internal))
-            if override_name and override_name != cmd_internal:
-                self._originals[(group, cmd_internal)] = cmd.name
-                cmd.name = override_name
-                renamed += 1
-
-        if renamed:
-            log.info("ReSlasher: applied %d command name override(s)", renamed)
-
-    async def _restore_originals(self, leaf_commands: dict[tuple[str, str], app_commands.Command]):
-        """Restore original command names on teardown."""
-        for (group, cmd_internal), original_name in self._originals.items():
-            cmd = leaf_commands.get((group, cmd_internal))
-            if cmd:
-                cmd.name = original_name
-        self._originals.clear()
 
     @commands.Cog.listener()
     async def on_ready(self):
         """Apply overrides once the bot is ready and all extensions are loaded."""
         leaf_commands = _collect_leaf_commands(self.bot)
 
-        await self._sync_registry(leaf_commands)
-        log.info("ReSlasher: synced %d commands to registry", len(leaf_commands))
+        created = await sync_registry(leaf_commands)
+        log.info("ReSlasher: synced %d commands to registry (%d new)", len(leaf_commands), created)
 
-        await self._apply_overrides(leaf_commands)
+        renamed = await apply_overrides(leaf_commands, self._originals)
+        if renamed:
+            log.info("ReSlasher: applied %d command name override(s)", renamed)
 
         try:
             await self.bot.tree.sync()
@@ -112,7 +114,11 @@ class ReSlasherCog(commands.Cog):
     async def cog_unload(self):
         """Restore original names when the cog is unloaded."""
         leaf_commands = _collect_leaf_commands(self.bot)
-        await self._restore_originals(leaf_commands)
+        for (group, cmd_internal), original_name in self._originals.items():
+            cmd = leaf_commands.get((group, cmd_internal))
+            if cmd:
+                cmd.name = original_name
+        self._originals.clear()
         try:
             await self.bot.tree.sync()
             log.info("ReSlasher: command tree synced after restoring original names")
