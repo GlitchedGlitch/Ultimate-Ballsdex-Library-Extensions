@@ -19,13 +19,13 @@ from django.db import models as dj_models
 
 
 class CommandNamesSettings(dj_models.Model):
-    """Proxy singleton — provides the settings panel entry point."""
+    """Proxy singleton - provides the settings panel entry point."""
 
     class Meta:
         verbose_name = "Command Names"
         verbose_name_plural = "Command Names"
         managed = False
-        app_label = "reslasher"
+        app_label = "settings"
 
 def build_command_form(groups: dict[str, list[tuple[str, str]]]) -> type[forms.Form]:
     """
