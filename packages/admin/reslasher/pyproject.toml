@@ -21,4 +21,8 @@ where = ["."]
 include = ["reslasher*"]
 
 [tool.setuptools.package-data]
-reslasher = ["templates/**/*", "static/**/*"]
+reslasher = [
+    "templates/**/*",
+    "static/**/*",
+    "migrations/**/*",
+]
