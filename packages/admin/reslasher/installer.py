@@ -11,7 +11,7 @@ GIT_URL     = f"git+https://github.com/{REPO}.git@{BRANCH}#subdirectory=packages
 APP_PATH    = "reslasher"
 TOML_MARKER = f'path = "{APP_PATH}"'
 TOML_ENTRY  = (
-    "\n\n# ReSlasher Package\n"
+    "\n\n# ReSlasher\n"
     "[[ballsdex.packages]]\n"
     f'location = "{GIT_URL}"\n'
     f'path = "{APP_PATH}"\n'
@@ -55,7 +55,7 @@ def _remove_toml():
     with open(EXTRA_TOML) as f:
         contents = f.read()
     cleaned = re.sub(
-        r"\n?# ReSlasher Package\n\[\[ballsdex\.packages\]\][^\[]*path\s*=\s*\"reslasher\"[^\[]*",
+        r"\n?# ReSlasher\n\[\[ballsdex\.packages\]\][^\[]*path\s*=\s*\"reslasher\"[^\[]*",
         "", contents, flags=re.DOTALL,
     )
     with open(EXTRA_TOML, "w") as f:
@@ -124,7 +124,7 @@ def build_warning_embed() -> discord.Embed:
 
 def build_confirm_remove_embed() -> discord.Embed:
     e = discord.Embed(
-        title="Remove ReSlasher Package",
+        title="Remove ReSlasher",
         description=(
             "⚠️ **Are you sure?**\n\n"
             "This will remove the entry from `config/extra.toml`.\n"
@@ -179,12 +179,12 @@ class InstallWarningView(View):
         async def update(i: int, success: bool = True):
             steps[i] = (steps[i][0], success)
             await self.parent.message.edit(
-                embed=_progress_embed("Installing ReSlasher Package…", steps, discord.Color.blurple()),
+                embed=_progress_embed("Installing ReSlasher…", steps, discord.Color.blurple()),
                 view=None,
             )
 
         await self.parent.message.edit(
-            embed=_progress_embed("Installing ReSlasher Package…", steps, discord.Color.blurple()),
+            embed=_progress_embed("Installing ReSlasher…", steps, discord.Color.blurple()),
             view=None,
         )
 
