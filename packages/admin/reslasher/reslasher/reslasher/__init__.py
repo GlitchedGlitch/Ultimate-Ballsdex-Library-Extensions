@@ -9,7 +9,7 @@ log = logging.getLogger("ballsdex.packages.reslasher")
 
 
 async def setup(bot: "BallsDexBot") -> None:
-    from .cog import ReSlasherCog, _walk_commands, sync_registry
+    from .cog import ReSlasherCog, _walk_commands, sync_registry, apply_overrides
     
     cog = ReSlasherCog(bot)
     await bot.add_cog(cog)
@@ -18,6 +18,10 @@ async def setup(bot: "BallsDexBot") -> None:
         commands_list = _walk_commands(bot.tree)
         created = await sync_registry(commands_list)
         log.info("ReSlasher: eagerly synced %d commands (%d new)", len(commands_list), created)
+        
+        renamed = await apply_overrides(bot)
+        if renamed:
+            log.info("ReSlasher: applied %d name override(s)", renamed)
     
     log.info("ReSlasherCog loaded")
 
