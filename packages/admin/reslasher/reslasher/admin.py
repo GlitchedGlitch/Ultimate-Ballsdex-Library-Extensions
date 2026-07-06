@@ -77,7 +77,8 @@ class CommandNamesAdmin(admin.ModelAdmin):
         return custom + urls
 
     def changelist_view(self, request: HttpRequest, extra_context=None):
-        return self.command_names_view(request)
+        from django.http import HttpResponseRedirect
+        return HttpResponseRedirect("command-names/")
 
     def command_names_view(self, request: HttpRequest):
         """Render the command names settings page."""
