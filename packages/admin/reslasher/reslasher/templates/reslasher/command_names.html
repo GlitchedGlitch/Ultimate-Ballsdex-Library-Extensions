@@ -12,7 +12,7 @@
 {% endblock %}
 
 {% block content %}
-<p>Set a custom display name for any slash command. Leave a field blank or unchanged to keep the default. Changes take effect after the bot applies them on the next sync — run <code>b.admin syncslash</code> in Discord after saving.</p>
+<p>Set a custom display name for any slash command. Leave a field blank or unchanged to keep the default. Changes take effect after restarting the bot.</p>
 
 {% if messages %}
 <ul class="messagelist">
@@ -22,7 +22,7 @@
 </ul>
 {% endif %}
 
-<form method="post" action="save/">
+<form method="post" action="{% url 'admin:reslasher_commandnamessettings_save' %}">
   {% csrf_token %}
 
   {% if not groups %}
@@ -30,37 +30,42 @@
   {% endif %}
 
   {% for display_group, cmds in groups.items %}
-  <fieldset class="module aligned">
-    <h2>{{ display_group }}</h2>
-    {% for field_key, current_name, label in cmds %}
-    <div class="form-row">
-      <div>
-        <label for="id_{{ field_key }}">
-          {{ label }}
-        </label>
-        <input
-          type="text"
-          name="{{ field_key }}"
-          id="id_{{ field_key }}"
-          value="{{ current_name }}"
-          placeholder="{{ current_name }}"
-          maxlength="32"
-          class="vTextField"
-        >
-        <p class="help">Currently: <strong>{{ current_name }}</strong></p>
-        {% if form.errors %}
-          {% for key, error_list in form.errors.items %}
-            {% if key == field_key %}
-              {% for error in error_list %}
-                <p class="errornote">{{ error }}</p>
-              {% endfor %}
-            {% endif %}
-          {% endfor %}
-        {% endif %}
+  <details class="module aligned" style="margin-bottom: 10px; border: 1px solid var(--border-color);">
+    <summary style="padding: 10px 12px; font-size: 14px; font-weight: bold; cursor: pointer; background: var(--darkened-bg);">
+      {{ display_group }} ({{ cmds|length }} command{{ cmds|length|pluralize }})
+    </summary>
+    <div style="padding: 0 12px 12px 12px;">
+      {% for field_key, current_name, label in cmds %}
+      <div class="form-row" style="padding: 8px 0; border-bottom: 1px solid var(--hairline-color);">
+        <div>
+          <label for="id_{{ field_key }}" style="font-weight: 500;">
+            {{ label }}
+          </label>
+          <input
+            type="text"
+            name="{{ field_key }}"
+            id="id_{{ field_key }}"
+            value="{{ current_name }}"
+            placeholder="{{ current_name }}"
+            maxlength="32"
+            class="vTextField"
+            style="width: 300px;"
+          >
+          <p class="help" style="margin: 2px 0 0 0;">Currently: <strong>{{ current_name }}</strong></p>
+          {% if form.errors %}
+            {% for key, error_list in form.errors.items %}
+              {% if key == field_key %}
+                {% for error in error_list %}
+                  <p class="errornote" style="margin: 2px 0 0 0;">{{ error }}</p>
+                {% endfor %}
+              {% endif %}
+            {% endfor %}
+          {% endif %}
+        </div>
       </div>
+      {% endfor %}
     </div>
-    {% endfor %}
-  </fieldset>
+  </details>
   {% endfor %}
 
   <div class="submit-row">
