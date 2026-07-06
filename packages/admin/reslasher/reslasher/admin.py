@@ -29,28 +29,27 @@ class CommandNamesSettings(dj_models.Model):
         app_label = "settings"
 
 
-def build_command_form(groups: dict[str, list[tuple[str, str, str]]]) -> type[forms.Form]:
+def build_command_form(fields_data: list[tuple[str, str, str]]) -> type[forms.Form]:
     """
-    Dynamically build a form with one field per leaf command.
+    Dynamically build a form with one field per leaf command
     """
     fields: dict[str, forms.Field] = {}
-    for display_group, cmds in groups.items():
-        for field_key, current_name, label in cmds:
-            fields[field_key] = forms.CharField(
-                label=label,
-                initial=current_name,
-                required=False,
-                max_length=32,
-                widget=forms.TextInput(attrs={"placeholder": current_name}),
-                help_text=f"Currently: {current_name}",
-                validators=[
-                    lambda v: re.match(r"^[\w-]{0,32}$", v) or (_ for _ in ()).throw(
-                        forms.ValidationError(
-                            "Must be 1–32 chars, lowercase letters, numbers, hyphens or underscores."
-                        )
+    for field_key, current_name, label in fields_data:
+        fields[field_key] = forms.CharField(
+            label=label,
+            initial=current_name,
+            required=False,
+            max_length=32,
+            widget=forms.TextInput(attrs={"placeholder": current_name}),
+            help_text=f"Currently: {current_name}",
+            validators=[
+                lambda v: re.match(r"^[\w-]{0,32}$", v) or (_ for _ in ()).throw(
+                    forms.ValidationError(
+                        "Must be 1–32 chars, lowercase letters, numbers, hyphens or underscores."
                     )
-                ],
-            )
+                )
+            ],
+        )
     form_class = type("CommandNamesForm", (forms.Form,), fields)
     return form_class
 
@@ -84,9 +83,9 @@ class CommandNamesAdmin(admin.ModelAdmin):
 
     def command_names_view(self, request: HttpRequest):
         """Render the command names settings page."""
-        groups = self._build_groups()
+        groups, flat_fields = self._build_groups()
 
-        form_class = build_command_form(groups)
+        form_class = build_command_form(flat_fields)
         form = form_class()
 
         context = {
@@ -104,8 +103,8 @@ class CommandNamesAdmin(admin.ModelAdmin):
         if request.method != "POST":
             return HttpResponseRedirect("../command-names/")
 
-        groups = self._build_groups()
-        form_class = build_command_form(groups)
+        groups, flat_fields = self._build_groups()
+        form_class = build_command_form(flat_fields)
         form = form_class(request.POST)
 
         if not form.is_valid():
@@ -120,7 +119,6 @@ class CommandNamesAdmin(admin.ModelAdmin):
             return render(request, "reslasher/command_names.html", context)
 
         proposed: dict[tuple[str, str, str], str] = {}
-        
         for field_key, value in form.cleaned_data.items():
             parts = field_key.split("__")
             if len(parts) == 3:
@@ -130,47 +128,44 @@ class CommandNamesAdmin(admin.ModelAdmin):
                 subgroup = ""
             else:
                 continue
-            
+
             value = value.strip().lower()
             if not value or value == cmd_internal:
                 continue
-                
+
             proposed[(group, subgroup, cmd_internal)] = value
 
-        names_by_parent: dict[tuple[str, str], list[str]] = {}
+        names_by_parent: dict[tuple[str, str], dict[str, tuple]] = {}
         for (g, sg, c), new_name in proposed.items():
             parent = (g, sg)
             if parent not in names_by_parent:
-                names_by_parent[parent] = []
-            for other_name in names_by_parent[parent]:
-                if other_name == new_name:
-                    field_key = f"{g}__{sg}__{c}" if sg else f"{g}__{c}"
-                    form.add_error(
-                        field_key,
-                        f"Name '{new_name}' conflicts with another command in the same group."
-                    )
-                    break
-            else:
-                names_by_parent[parent].append(new_name)
-                continue
-            break
+                names_by_parent[parent] = {}
 
-        existing_names: dict[tuple[str, str], set[str]] = {}
+            if new_name in names_by_parent[parent]:
+                other = names_by_parent[parent][new_name]
+                field_key = f"{g}__{sg}__{c}" if sg else f"{g}__{c}"
+                form.add_error(
+                    field_key,
+                    f"Name '{new_name}' conflicts with {'/'.join(filter(None, other))}"
+                )
+            names_by_parent[parent][new_name] = (g, sg, c)
+
+        existing: dict[tuple[str, str], set[str]] = {}
         for row in CommandRegistry.objects.all():
             parent = (row.group, row.subgroup)
-            if parent not in existing_names:
-                existing_names[parent] = set()
+            if parent not in existing:
+                existing[parent] = set()
             override = proposed.get((row.group, row.subgroup, row.command))
-            existing_names[parent].add(override or row.command)
+            existing[parent].add(override or row.command)
 
         for (g, sg, c), new_name in proposed.items():
             parent = (g, sg)
-            count = sum(1 for name in existing_names.get(parent, []) if name == new_name)
+            count = sum(1 for name in existing.get(parent, []) if name == new_name)
             if count > 1:
                 field_key = f"{g}__{sg}__{c}" if sg else f"{g}__{c}"
                 form.add_error(
                     field_key,
-                    f"Name '{new_name}' already exists in this group. Choose a different name."
+                    f"Name '{new_name}' already exists in this group."
                 )
 
         if not form.is_valid():
@@ -186,7 +181,7 @@ class CommandNamesAdmin(admin.ModelAdmin):
 
         saved = 0
         cleared = 0
-        
+
         for field_key, value in form.cleaned_data.items():
             parts = field_key.split("__")
             if len(parts) == 3:
@@ -215,22 +210,21 @@ class CommandNamesAdmin(admin.ModelAdmin):
                 if not created:
                     saved += 1
 
-        parts = []
+        parts_msg = []
         if saved:
-            parts.append(f"{saved} override(s) saved")
+            parts_msg.append(f"{saved} override(s) saved")
         if cleared:
-            parts.append(f"{cleared} reset to default")
-        
-        if parts:
-            messages.success(request, "Command names updated: " + ", ".join(parts) + ". Restart the bot to apply changes.")
+            parts_msg.append(f"{cleared} reset to default")
+        if parts_msg:
+            messages.success(request, "Command names updated: " + ", ".join(parts_msg) + ". Run b.reloadtree to apply.")
         else:
             messages.info(request, "No changes made.")
 
         return HttpResponseRedirect("../command-names/")
 
-    def _build_groups(self) -> dict[str, list[dict]]:
+    def _build_groups(self) -> tuple[dict[str, list], list[tuple[str, str, str]]]:
         """
-        Build display groups from registry
+        Build display groups and flat field list.
         """
         overrides = {
             (o.group, o.subgroup, o.command): o.name
@@ -240,7 +234,7 @@ class CommandNamesAdmin(admin.ModelAdmin):
         by_subgroup: dict[tuple[str, str], list[tuple[str, str, str]]] = {}
         for row in CommandRegistry.objects.all().order_by("group", "subgroup", "command"):
             key = (row.group, row.subgroup)
-            
+
             if row.subgroup:
                 field_key = f"{row.group}__{row.subgroup}__{row.command}"
                 label = f"{row.subgroup.title()} {row.command.title()}"
@@ -254,8 +248,9 @@ class CommandNamesAdmin(admin.ModelAdmin):
             current = overrides.get((row.group, row.subgroup, row.command), row.command)
             by_subgroup.setdefault(key, []).append((field_key, current, label))
 
-        display_groups: dict[str, list[dict]] = {}
-        
+        display_groups: dict[str, list] = {}
+        flat_fields: list[tuple[str, str, str]] = []
+
         for (group, subgroup), cmds in by_subgroup.items():
             if not group:
                 display_group = "Top-level Commands"
@@ -267,11 +262,12 @@ class CommandNamesAdmin(admin.ModelAdmin):
                         "current": current,
                         "label": label,
                     })
+                    flat_fields.append((field_key, current, label))
                 continue
 
             display_group = f"/{group} Group"
             section = display_groups.setdefault(display_group, [])
-            
+
             if subgroup:
                 nested = []
                 for field_key, current, label in cmds:
@@ -281,6 +277,7 @@ class CommandNamesAdmin(admin.ModelAdmin):
                         "current": current,
                         "label": label,
                     })
+                    flat_fields.append((field_key, current, label))
                 section.append({
                     "type": "header",
                     "name": subgroup.title(),
@@ -294,8 +291,9 @@ class CommandNamesAdmin(admin.ModelAdmin):
                         "current": current,
                         "label": label,
                     })
+                    flat_fields.append((field_key, current, label))
 
-        return display_groups
+        return display_groups, flat_fields
 
     def has_add_permission(self, request):
         return False
