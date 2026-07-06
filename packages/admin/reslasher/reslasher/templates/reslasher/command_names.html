@@ -1,0 +1,75 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block title %}Command Names | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
+  &rsaquo; <a href="{% url 'admin:index' %}">{% trans 'Settings' %}</a>
+  &rsaquo; {% trans 'Command Names' %}
+</div>
+{% endblock %}
+
+{% block content %}
+<h1>Command Names</h1>
+<p>Set a custom display name for any slash command. Leave a field blank or unchanged to keep the default. Changes take effect after the bot applies them on the next sync — run <code>b.admin syncslash</code> in Discord after saving.</p>
+
+{% if messages %}
+<ul class="messagelist">
+  {% for message in messages %}
+  <li class="{{ message.tags }}">{{ message }}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+<form method="post" action="save/">
+  {% csrf_token %}
+
+  {% if not groups %}
+    <p class="help">No commands are registered yet. The bot must start at least once with this package installed before commands appear here.</p>
+  {% endif %}
+
+  {% for group, cmds in groups.items %}
+  <fieldset class="module aligned">
+    <h2>
+      {% if group %}
+        /{{ group }} Group
+      {% else %}
+        Top-level Commands
+      {% endif %}
+    </h2>
+    {% for cmd_internal, current_name in cmds %}
+    {% with field_key=group|add:"__"|add:cmd_internal %}
+    <div class="form-row">
+      <div>
+        <label for="id_{{ field_key }}">
+          {{ cmd_internal|title }}
+        </label>
+        <input
+          type="text"
+          name="{{ field_key }}"
+          id="id_{{ field_key }}"
+          value="{{ current_name }}"
+          placeholder="{{ cmd_internal }}"
+          maxlength="32"
+          class="vTextField"
+        >
+        <p class="help">Currently: <strong>{{ current_name }}</strong></p>
+        {% if form.errors %}
+          {% with error=form.errors|get_item:field_key %}
+            {% if error %}<p class="errornote">{{ error }}</p>{% endif %}
+          {% endwith %}
+        {% endif %}
+      </div>
+    </div>
+    {% endwith %}
+    {% endfor %}
+  </fieldset>
+  {% endfor %}
+
+  <div class="submit-row">
+    <input type="submit" value="Save Command Names" class="default" name="_save">
+  </div>
+</form>
+{% endblock %}
