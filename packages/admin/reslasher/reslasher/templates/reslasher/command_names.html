@@ -57,9 +57,13 @@
         >
         <p class="help">Currently: <strong>{{ current_name }}</strong></p>
         {% if form.errors %}
-          {% with error=form.errors|get_item:field_key %}
-            {% if error %}<p class="errornote">{{ error }}</p>{% endif %}
-          {% endwith %}
+          {% for key, error_list in form.errors.items %}
+            {% if key == field_key %}
+              {% for error in error_list %}
+                <p class="errornote">{{ error }}</p>
+              {% endfor %}
+            {% endif %}
+          {% endfor %}
         {% endif %}
       </div>
     </div>
