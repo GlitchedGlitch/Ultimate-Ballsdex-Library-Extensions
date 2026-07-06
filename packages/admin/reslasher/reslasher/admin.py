@@ -228,30 +228,55 @@ class CommandNamesAdmin(admin.ModelAdmin):
 
         return HttpResponseRedirect("../command-names/")
 
-    def _build_groups(self) -> dict[str, list[tuple[str, str, str]]]:
-        """Build display groups from registry."""
+    def _build_groups(self) -> dict[str, list[tuple[str, str, str, str]]]:
+        """
+        Build display groups from registry
+        """
         overrides = {
             (o.group, o.subgroup, o.command): o.name
             for o in CommandNameOverride.objects.all()
         }
 
-        display_groups: dict[str, list[tuple[str, str, str]]] = {}
+        raw: dict[tuple[str, str], list[tuple[str, str, str]]] = {}
         for row in CommandRegistry.objects.all().order_by("group", "subgroup", "command"):
+            key = (row.group, row.subgroup)
             if row.subgroup:
                 field_key = f"{row.group}__{row.subgroup}__{row.command}"
-                display_group = f"/{row.group} {row.subgroup}".strip()
                 label = f"{row.subgroup.title()} {row.command.title()}"
             elif row.group:
                 field_key = f"{row.group}__{row.command}"
-                display_group = f"/{row.group} Group"
                 label = row.command.replace("_", " ").title()
             else:
                 field_key = f"__{row.command}"
-                display_group = "Top-level Commands"
                 label = row.command.replace("_", " ").title()
 
             current = overrides.get((row.group, row.subgroup, row.command), row.command)
-            display_groups.setdefault(display_group, []).append((field_key, current, label))
+            raw.setdefault(key, []).append((field_key, current, label))
+
+        display_groups: dict[str, list[tuple[str, str, str, str]]] = {}
+        
+        for (group, subgroup), cmds in raw.items():
+            if not group:
+                display_group = "Top-level Commands"
+                for field_key, current, label in cmds:
+                    display_groups.setdefault(display_group, []).append(
+                        (field_key, current, label, "")
+                    )
+                continue
+
+            display_group = f"/{group} Group"
+            
+            if subgroup:
+                header = f"{subgroup.title()}"
+                for field_key, current, label in cmds:
+                    display_groups.setdefault(display_group, []).append(
+                        (field_key, current, label, header)
+                    )
+            else:
+                for field_key, current, label in cmds:
+                    display_groups.setdefault(display_group, []).append(
+                        (field_key, current, label, "")
+                    )
 
         return display_groups
 
