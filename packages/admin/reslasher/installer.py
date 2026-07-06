@@ -6,7 +6,7 @@ import io, os, re, traceback, discord
 from discord.ui import View, Button
 
 REPO        = "GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
-BRANCH      = "v3"
+BRANCH      = "v3-dev"
 GIT_URL     = f"git+https://github.com/{REPO}.git@{BRANCH}#subdirectory=packages/admin/reslasher"
 APP_PATH    = "reslasher"
 TOML_MARKER = f'path = "{APP_PATH}"'
