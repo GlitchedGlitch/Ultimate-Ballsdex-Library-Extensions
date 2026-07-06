@@ -228,7 +228,7 @@ class CommandNamesAdmin(admin.ModelAdmin):
 
         return HttpResponseRedirect("../command-names/")
 
-    def _build_groups(self) -> dict[str, list[tuple[str, str, str, str]]]:
+    def _build_groups(self) -> dict[str, list[dict]]:
         """
         Build display groups from registry
         """
@@ -237,9 +237,10 @@ class CommandNamesAdmin(admin.ModelAdmin):
             for o in CommandNameOverride.objects.all()
         }
 
-        raw: dict[tuple[str, str], list[tuple[str, str, str]]] = {}
+        by_subgroup: dict[tuple[str, str], list[tuple[str, str, str]]] = {}
         for row in CommandRegistry.objects.all().order_by("group", "subgroup", "command"):
             key = (row.group, row.subgroup)
+            
             if row.subgroup:
                 field_key = f"{row.group}__{row.subgroup}__{row.command}"
                 label = f"{row.subgroup.title()} {row.command.title()}"
@@ -251,32 +252,48 @@ class CommandNamesAdmin(admin.ModelAdmin):
                 label = row.command.replace("_", " ").title()
 
             current = overrides.get((row.group, row.subgroup, row.command), row.command)
-            raw.setdefault(key, []).append((field_key, current, label))
+            by_subgroup.setdefault(key, []).append((field_key, current, label))
 
-        display_groups: dict[str, list[tuple[str, str, str, str]]] = {}
+        display_groups: dict[str, list[dict]] = {}
         
-        for (group, subgroup), cmds in raw.items():
+        for (group, subgroup), cmds in by_subgroup.items():
             if not group:
                 display_group = "Top-level Commands"
+                section = display_groups.setdefault(display_group, [])
                 for field_key, current, label in cmds:
-                    display_groups.setdefault(display_group, []).append(
-                        (field_key, current, label, "")
-                    )
+                    section.append({
+                        "type": "command",
+                        "field_key": field_key,
+                        "current": current,
+                        "label": label,
+                    })
                 continue
 
             display_group = f"/{group} Group"
+            section = display_groups.setdefault(display_group, [])
             
             if subgroup:
-                header = f"{subgroup.title()}"
+                nested = []
                 for field_key, current, label in cmds:
-                    display_groups.setdefault(display_group, []).append(
-                        (field_key, current, label, header)
-                    )
+                    nested.append({
+                        "type": "command",
+                        "field_key": field_key,
+                        "current": current,
+                        "label": label,
+                    })
+                section.append({
+                    "type": "header",
+                    "name": subgroup.title(),
+                    "commands": nested,
+                })
             else:
                 for field_key, current, label in cmds:
-                    display_groups.setdefault(display_group, []).append(
-                        (field_key, current, label, "")
-                    )
+                    section.append({
+                        "type": "command",
+                        "field_key": field_key,
+                        "current": current,
+                        "label": label,
+                    })
 
         return display_groups
 
