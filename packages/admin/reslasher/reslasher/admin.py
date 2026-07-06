@@ -13,8 +13,8 @@ from django.http import HttpRequest, HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import path
 
-from .models import CommandNameOverride
-from .models import CommandRegistry
+from .models import CommandNameOverride, CommandRegistry
+
 from django.db import models as dj_models
 
 
@@ -27,20 +27,21 @@ class CommandNamesSettings(dj_models.Model):
         managed = False
         app_label = "settings"
 
-def build_command_form(groups: dict[str, list[tuple[str, str]]]) -> type[forms.Form]:
+
+def build_command_form(groups: dict[str, list[tuple[str, str, str]]]) -> type[forms.Form]:
     """
-    Dynamically build a form with one field per leaf command
+    Dynamically build a form with one field per leaf command.
+    groups: { display_group: [(field_key, current_name, label), ...] }
     """
     fields: dict[str, forms.Field] = {}
-    for group, cmds in groups.items():
-        for cmd_name, current_name in cmds:
-            field_key = f"{group}__{cmd_name}" if group else f"__{cmd_name}"
+    for display_group, cmds in groups.items():
+        for field_key, current_name, label in cmds:
             fields[field_key] = forms.CharField(
-                label=cmd_name.replace("_", " ").title(),
+                label=label,
                 initial=current_name,
                 required=False,
                 max_length=32,
-                widget=forms.TextInput(attrs={"placeholder": cmd_name}),
+                widget=forms.TextInput(attrs={"placeholder": current_name}),
                 help_text=f"Currently: {current_name}",
                 validators=[
                     lambda v: re.match(r"^[\w-]{0,32}$", v) or (_ for _ in ()).throw(
@@ -52,6 +53,7 @@ def build_command_form(groups: dict[str, list[tuple[str, str]]]) -> type[forms.F
             )
     form_class = type("CommandNamesForm", (forms.Form,), fields)
     return form_class
+
 
 @admin.register(CommandNamesSettings)
 class CommandNamesAdmin(admin.ModelAdmin):
@@ -71,7 +73,7 @@ class CommandNamesAdmin(admin.ModelAdmin):
             path(
                 "command-names/save/",
                 self.admin_site.admin_view(self.save_names_view),
-                name="reslasher_commandnamessettings_change",
+                name="reslasher_commandnamessettings_save",
             ),
         ]
         return custom + urls
@@ -84,25 +86,35 @@ class CommandNamesAdmin(admin.ModelAdmin):
         """Render the command names settings page."""
         groups = _collect_commands()
         overrides = {
-            (o.group, o.command): o.name
+            (o.group, o.subgroup, o.command): o.name
             for o in CommandNameOverride.objects.all()
         }
 
-        resolved: dict[str, list[tuple[str, str]]] = {}
-        for group in sorted(groups.keys()):
-            cmds = []
-            for cmd_internal in sorted(groups[group]):
-                current = overrides.get((group, cmd_internal), cmd_internal)
-                cmds.append((cmd_internal, current))
-            resolved[group] = cmds
+        display_groups: dict[str, list[tuple[str, str, str]]] = {}
+        for row in CommandRegistry.objects.all().order_by("group", "subgroup", "command"):
+            if row.subgroup:
+                field_key = f"{row.group}__{row.subgroup}__{row.command}"
+                display_group = f"/{row.group} {row.subgroup}".strip()
+                label = f"{row.subgroup.title()} {row.command.title()}"
+            elif row.group:
+                field_key = f"{row.group}__{row.command}"
+                display_group = f"/{row.group} Group"
+                label = row.command.replace("_", " ").title()
+            else:
+                field_key = f"__{row.command}"
+                display_group = "Top-level Commands"
+                label = row.command.replace("_", " ").title()
 
-        form_class = build_command_form(resolved)
+            current = overrides.get((row.group, row.subgroup, row.command), row.command)
+            display_groups.setdefault(display_group, []).append((field_key, current, label))
+
+        form_class = build_command_form(display_groups)
         form = form_class()
 
         context = {
             **self.admin_site.each_context(request),
             "title": "Command Names",
-            "groups": resolved,
+            "groups": display_groups,
             "form": form,
             "opts": self.model._meta,
             "has_permission": True,
@@ -116,27 +128,37 @@ class CommandNamesAdmin(admin.ModelAdmin):
 
         groups = _collect_commands()
         overrides = {
-            (o.group, o.command): o
+            (o.group, o.subgroup, o.command): o
             for o in CommandNameOverride.objects.all()
         }
 
-        resolved: dict[str, list[tuple[str, str]]] = {}
-        for group in sorted(groups.keys()):
-            cmds = []
-            for cmd_internal in sorted(groups[group]):
-                current_override = overrides.get((group, cmd_internal))
-                current = current_override.name if current_override else cmd_internal
-                cmds.append((cmd_internal, current))
-            resolved[group] = cmds
+        display_groups: dict[str, list[tuple[str, str, str]]] = {}
+        for row in CommandRegistry.objects.all().order_by("group", "subgroup", "command"):
+            if row.subgroup:
+                field_key = f"{row.group}__{row.subgroup}__{row.command}"
+                display_group = f"/{row.group} {row.subgroup}".strip()
+                label = f"{row.subgroup.title()} {row.command.title()}"
+            elif row.group:
+                field_key = f"{row.group}__{row.command}"
+                display_group = f"/{row.group} Group"
+                label = row.command.replace("_", " ").title()
+            else:
+                field_key = f"__{row.command}"
+                display_group = "Top-level Commands"
+                label = row.command.replace("_", " ").title()
 
-        form_class = build_command_form(resolved)
+            current_override = overrides.get((row.group, row.subgroup, row.command))
+            current = current_override.name if current_override else row.command
+            display_groups.setdefault(display_group, []).append((field_key, current, label))
+
+        form_class = build_command_form(display_groups)
         form = form_class(request.POST)
 
         if not form.is_valid():
             context = {
                 **self.admin_site.each_context(request),
                 "title": "Command Names",
-                "groups": resolved,
+                "groups": display_groups,
                 "form": form,
                 "opts": self.model._meta,
                 "has_permission": True,
@@ -146,25 +168,34 @@ class CommandNamesAdmin(admin.ModelAdmin):
         saved = 0
         cleared = 0
         for field_key, value in form.cleaned_data.items():
-            if "__" not in field_key:
+            parts = field_key.split("__")
+            if len(parts) == 3:
+                group, subgroup, cmd_internal = parts
+            elif len(parts) == 2:
+                group, cmd_internal = parts
+                subgroup = ""
+            else:
                 continue
-            parts = field_key.split("__", 1)
-            group, cmd_internal = parts[0], parts[1]
+
             value = value.strip().lower()
 
             if not value or value == cmd_internal:
                 deleted, _ = CommandNameOverride.objects.filter(
-                    group=group, command=cmd_internal
+                    group=group, subgroup=subgroup, command=cmd_internal
                 ).delete()
                 if deleted:
                     cleared += 1
             else:
                 _, created = CommandNameOverride.objects.update_or_create(
                     group=group,
+                    subgroup=subgroup,
                     command=cmd_internal,
                     defaults={"name": value},
                 )
-                saved += 1
+                if not created:
+                    saved += 1
+
+        self._notify_bot_reload()
 
         parts = []
         if saved:
@@ -177,6 +208,21 @@ class CommandNamesAdmin(admin.ModelAdmin):
             messages.info(request, "No changes made.")
 
         return HttpResponseRedirect("../")
+
+    def _notify_bot_reload(self):
+        """Notify the running bot to reload command overrides."""
+        try:
+            import asyncio
+            from asgiref.sync import async_to_sync
+            from ballsdex.core.bot import BallsDexBot
+            bot = getattr(BallsDexBot, '_instance', None)
+            if bot:
+                cog = bot.get_cog("ReSlasher")
+                if cog and hasattr(cog, '_reload_overrides'):
+                    asyncio.create_task(cog._reload_overrides())
+                    log.info("ReSlasher: triggered reload from admin panel")
+        except Exception as e:
+            log.warning(f"ReSlasher: could not notify bot to reload: {e}")
 
     def has_add_permission(self, request):
         return False
@@ -195,8 +241,8 @@ def _collect_commands() -> dict[str, list[str]]:
     """
     Return { group_name: [cmd_internal_name, ...] } from the CommandRegistry
     """
-    
     result: dict[str, list[str]] = {}
-    for row in CommandRegistry.objects.all().order_by("group", "command"):
-        result.setdefault(row.group, []).append(row.command)
+    for row in CommandRegistry.objects.all().order_by("group", "subgroup", "command"):
+        key = f"{row.group}__{row.subgroup}__{row.command}".strip("_")
+        result.setdefault(row.group or "Top-level", []).append(key)
     return result
