@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ReSlasher"
+version = "1.0.0"
+description = "Rename slash commands without touching a single bot file 🦐"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Glitch" }]
+readme = "README.md"
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions"
+Package = "https://github.com/GlitchedGlitch/Ultimate-Ballsdex-Library-Extensions/tree/v3/packages/admin/broadcast"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["reslasher*"]
