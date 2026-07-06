@@ -20,37 +20,40 @@ if TYPE_CHECKING:
 log = logging.getLogger("ballsdex.packages.reslasher")
 
 
-def _collect_leaf_commands(
-    bot: "BallsDexBot",
-) -> dict[tuple[str, str], app_commands.Command]:
+def _walk_commands(tree) -> list[tuple[str, str, str, app_commands.Command]]:
     """
-    Return { (group_name, cmd_internal_name): Command } for every leaf command.
-    group_name is "" for ungrouped top-level commands.
+    Walk the entire command tree and return flat list
     """
-    result: dict[tuple[str, str], app_commands.Command] = {}
-    for cmd in bot.tree.get_commands():
+    result: list[tuple[str, str, str, app_commands.Command]] = []
+    
+    for cmd in tree.get_commands():
         if isinstance(cmd, app_commands.Group):
             for sub in cmd.walk_commands():
                 if isinstance(sub, app_commands.Command):
-                    result[(cmd.name, sub.name)] = sub
+                    parent = sub.parent
+                    if isinstance(parent, app_commands.Group) and parent != cmd:
+                        result.append((cmd.name, parent.name, sub.name, sub))
+                    else:
+                        result.append((cmd.name, "", sub.name, sub))
         elif isinstance(cmd, app_commands.Command):
-            result[("", cmd.name)] = cmd
+            result.append(("", "", cmd.name, cmd))
+    
     return result
 
 
-async def sync_registry(leaf_commands: dict[tuple[str, str], app_commands.Command]) -> int:
-    """Write all known leaf commands to CommandRegistry for admin panel discovery."""
+async def sync_registry(commands_list: list[tuple[str, str, str, app_commands.Command]]) -> int:
+    """Write all known commands to CommandRegistry for admin panel discovery."""
     @sync_to_async
     def _do_sync():
         existing = {
-            (r.group, r.command)
+            (r.group, r.subgroup, r.command)
             for r in CommandRegistry.objects.all()
         }
-        new_keys = set(leaf_commands.keys())
+        new_keys = {(g, sg, c) for g, sg, c, _ in commands_list}
 
         to_create = [
-            CommandRegistry(group=g, command=c)
-            for g, c in new_keys - existing
+            CommandRegistry(group=g, subgroup=sg, command=c)
+            for g, sg, c in new_keys - existing
         ]
         created = 0
         if to_create:
@@ -59,8 +62,10 @@ async def sync_registry(leaf_commands: dict[tuple[str, str], app_commands.Comman
 
         stale = existing - new_keys
         if stale:
-            for group, command in stale:
-                CommandRegistry.objects.filter(group=group, command=command).delete()
+            for group, subgroup, command in stale:
+                CommandRegistry.objects.filter(
+                    group=group, subgroup=subgroup, command=command
+                ).delete()
 
         return created
 
@@ -68,20 +73,21 @@ async def sync_registry(leaf_commands: dict[tuple[str, str], app_commands.Comman
 
 
 async def apply_overrides(
-    leaf_commands: dict[tuple[str, str], app_commands.Command],
-    originals: dict[tuple[str, str], str],
+    commands_list: list[tuple[str, str, str, app_commands.Command]],
+    originals: dict[tuple[str, str, str], str],
 ) -> int:
     """Read overrides from DB and apply them to live command objects."""
     overrides = {
-        (o.group, o.command): o.name
+        (o.group, o.subgroup, o.command): o.name
         async for o in CommandNameOverride.objects.all()
     }
 
     renamed = 0
-    for (group, cmd_internal), cmd in leaf_commands.items():
-        override_name = overrides.get((group, cmd_internal))
-        if override_name and override_name != cmd_internal:
-            originals[(group, cmd_internal)] = cmd.name
+    for group, subgroup, cmd_name, cmd in commands_list:
+        key = (group, subgroup, cmd_name)
+        override_name = overrides.get(key)
+        if override_name and override_name != cmd_name:
+            originals[key] = cmd.name
             cmd.name = override_name
             renamed += 1
 
@@ -91,17 +97,37 @@ async def apply_overrides(
 class ReSlasherCog(commands.Cog):
     def __init__(self, bot: "BallsDexBot"):
         self.bot = bot
-        self._originals: dict[tuple[str, str], str] = {}
+        self._originals: dict[tuple[str, str, str], str] = {}
+
+    async def _reload_overrides(self):
+        """Re-apply overrides from DB to live commands. Call after saving in admin."""
+        commands_list = _walk_commands(self.bot.tree)
+        for key, original in self._originals.items():
+            group, subgroup, cmd_name = key
+            for g, sg, c, cmd in commands_list:
+                if (g, sg, c) == key:
+                    cmd.name = original
+                    break
+        self._originals.clear()
+        renamed = await apply_overrides(commands_list, self._originals)
+        if renamed:
+            log.info("ReSlasher: re-applied %d command name override(s)", renamed)
+        
+        try:
+            await self.bot.tree.sync()
+            log.info("ReSlasher: command tree re-synced")
+        except Exception:
+            log.warning("ReSlasher: failed to re-sync command tree", exc_info=True)
 
     @commands.Cog.listener()
     async def on_ready(self):
         """Apply overrides once the bot is ready and all extensions are loaded."""
-        leaf_commands = _collect_leaf_commands(self.bot)
+        commands_list = _walk_commands(self.bot.tree)
 
-        created = await sync_registry(leaf_commands)
-        log.info("ReSlasher: synced %d commands to registry (%d new)", len(leaf_commands), created)
+        created = await sync_registry(commands_list)
+        log.info("ReSlasher: synced %d commands to registry (%d new)", len(commands_list), created)
 
-        renamed = await apply_overrides(leaf_commands, self._originals)
+        renamed = await apply_overrides(commands_list, self._originals)
         if renamed:
             log.info("ReSlasher: applied %d command name override(s)", renamed)
 
@@ -113,11 +139,12 @@ class ReSlasherCog(commands.Cog):
 
     async def cog_unload(self):
         """Restore original names when the cog is unloaded."""
-        leaf_commands = _collect_leaf_commands(self.bot)
-        for (group, cmd_internal), original_name in self._originals.items():
-            cmd = leaf_commands.get((group, cmd_internal))
-            if cmd:
-                cmd.name = original_name
+        commands_list = _walk_commands(self.bot.tree)
+        for key, original_name in self._originals.items():
+            for g, sg, c, cmd in commands_list:
+                if (g, sg, c) == key:
+                    cmd.name = original_name
+                    break
         self._originals.clear()
         try:
             await self.bot.tree.sync()
