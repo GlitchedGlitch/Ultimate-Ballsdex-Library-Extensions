@@ -29,28 +29,21 @@
     <p class="help">No commands are registered yet. The bot must start at least once with this package installed before commands appear here.</p>
   {% endif %}
 
-  {% for group, cmds in groups.items %}
+  {% for display_group, cmds in groups.items %}
   <fieldset class="module aligned">
-    <h2>
-      {% if group %}
-        /{{ group }} Group
-      {% else %}
-        Top-level Commands
-      {% endif %}
-    </h2>
-    {% for cmd_internal, current_name in cmds %}
-    {% with field_key=group|add:"__"|add:cmd_internal %}
+    <h2>{{ display_group }}</h2>
+    {% for field_key, current_name, label in cmds %}
     <div class="form-row">
       <div>
         <label for="id_{{ field_key }}">
-          {{ cmd_internal|title }}
+          {{ label }}
         </label>
         <input
           type="text"
           name="{{ field_key }}"
           id="id_{{ field_key }}"
           value="{{ current_name }}"
-          placeholder="{{ cmd_internal }}"
+          placeholder="{{ current_name }}"
           maxlength="32"
           class="vTextField"
         >
@@ -66,7 +59,6 @@
         {% endif %}
       </div>
     </div>
-    {% endwith %}
     {% endfor %}
   </fieldset>
   {% endfor %}
