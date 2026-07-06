@@ -14,7 +14,7 @@ from django.shortcuts import render
 from django.urls import path
 
 from .models import CommandNameOverride
-
+from .models import CommandRegistry
 from django.db import models as dj_models
 
 
@@ -194,7 +194,7 @@ def _collect_commands() -> dict[str, list[str]]:
     """
     Return { group_name: [cmd_internal_name, ...] } from the CommandRegistry
     """
-    from .models import CommandRegistry
+    
     result: dict[str, list[str]] = {}
     for row in CommandRegistry.objects.all().order_by("group", "command"):
         result.setdefault(row.group, []).append(row.command)
