@@ -215,12 +215,14 @@ class CommandNamesAdmin(admin.ModelAdmin):
             parts_msg.append(f"{saved} override(s) saved")
         if cleared:
             parts_msg.append(f"{cleared} reset to default")
+
         if parts_msg:
             messages.success(request, "Command names updated: " + ", ".join(parts_msg) + ". Run b.reloadtree to apply.")
         else:
             messages.info(request, "No changes made.")
 
-        return HttpResponseRedirect("../command-names/")
+        from django.urls import reverse
+        return HttpResponseRedirect(reverse("admin:reslasher_commandnamessettings_changelist"))
 
     def _build_groups(self) -> tuple[dict[str, list], list[tuple[str, str, str]]]:
         """
