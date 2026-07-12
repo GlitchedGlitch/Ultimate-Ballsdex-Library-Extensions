@@ -410,7 +410,7 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
 
             container.accent_color = line_color
 
-        title_text = f"# {plural} Rarity List"
+        title_text = f"# {settings.bot_name} Rarity List"
         container.add_item(discord.ui.TextDisplay(title_text))
         container.add_item(discord.ui.Separator())
         header_item_count = 2 
