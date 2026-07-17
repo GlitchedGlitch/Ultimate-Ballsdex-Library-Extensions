@@ -212,6 +212,11 @@ def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Com
                         ephemeral=True,
                     )
 
+                elif e.code == 50278:
+                    await interaction.followup.send(
+                        f"Could not DM **{dm}** because the bot does not share any mutual servers.",
+                        ephemeral=True
+                )
                 else:
                     await interaction.followup.send(
                         f"Error:\n```py\n{e}\n```",
