@@ -133,7 +133,7 @@ def build_rarity_command(bot: "BallsDexBot") -> app_commands.Command:
 
         source = FieldPageSource(entries, per_page=GROUPS_PER_PAGE, inline=False)
         source.embed.title = f"{settings.bot_name} Rarity List"
-        source.embed.color = 0XFFFFFF
+        source.embed.color = discord.Color.blurple()
 
         pages = Pages(source, interaction=interaction)
         await pages.start(ephemeral=ephemeral)
