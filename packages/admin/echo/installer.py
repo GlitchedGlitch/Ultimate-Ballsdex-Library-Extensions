@@ -18,8 +18,8 @@ TOML_ENTRY  = (
     "enabled = true"
 )
 
-EXTRA_TOML  = "/code/config/extra.toml"
-NAME_FILE   = "/code/config/echo_name.txt"
+EXTRA_TOML  = "/code/admin_panel/config/extra.toml"
+NAME_FILE   = "/code/admin_panel/config/echo_name.txt"
 DEFAULT_NAME = "echo"
 
 FOOTER         = "Ultimate BallsDex Library Extensions • by Glitch (@glitchy.glitch)"
