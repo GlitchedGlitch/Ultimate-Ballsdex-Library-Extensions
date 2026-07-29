@@ -1,6 +1,5 @@
 from django.apps import AppConfig
 
-
 class ReSlasherConfig(AppConfig):
     name = "reslasher"
     verbose_name = "ReSlasher"
