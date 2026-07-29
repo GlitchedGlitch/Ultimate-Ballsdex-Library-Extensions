@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ReSlasher"
 version = "1.0.0"
-description = "Rename slash commands without touching a single bot file 🦐"
+description = "Rename slash commands without touching a single bot file. Do not install yet, this is an experimental package. This could lead to fatal errors"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Glitch" }]
@@ -22,7 +22,5 @@ include = ["reslasher*"]
 
 [tool.setuptools.package-data]
 reslasher = [
-    "templates/**/*",
-    "static/**/*",
     "migrations/**/*",
 ]
