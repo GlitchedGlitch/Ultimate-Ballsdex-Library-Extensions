@@ -116,17 +116,17 @@ class EchoCog(commands.Cog):
         self.bot = bot
 
 
-def EchoAdminCommand(bot: "BallsDexBot", name: str = "echo") -> app_commands.Command:
+def EchoAdminCommand(bot: "BallsDexBot") -> app_commands.Command:
     @app_commands.command(
-        name=name,
+        name="echo",
         description="Send, edit, delete or reply to messages as the bot",
     )
     @app_commands.checks.has_any_role(*settings.root_role_ids, *settings.admin_role_ids)
     @app_commands.describe(
-        message="The text content to send or use when editing. Use {e:Ball Name} for ball/app emojis",
+        message="The text content to send or use when editing. Use {e:Ball Name} for ball emojis",
         file="A file to attach",
         embed="Wrap the message text in an embed",
-        channel="Channel ID or <#mention> to send to — works cross-server (default: current channel)",
+        channel="Channel ID or <#mention> to send to",
         dm="User ID to send the message to via DM (ignores channel parameter)",
         reply="Message link to reply to when sending",
         edit_message="Message link to edit instead of sending a new message",
