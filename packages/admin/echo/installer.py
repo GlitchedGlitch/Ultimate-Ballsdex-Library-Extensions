@@ -117,7 +117,6 @@ def build_main_embed(installed: bool, color: discord.Color) -> discord.Embed:
             "• `reply` — message link to reply to\n"
             "• `edit_message` — message link to edit instead of sending\n" 
             "• `delete_message` — message link to delete the message\n\n"
-            f"**Command name:** `/admin {CMD_NAME}`\n"
             f"**Status:** {'✅ Installed' if installed else '❌ Not installed'}"
         ),
         color=color,
